@@ -16,8 +16,10 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define SERVER_PORT 8080
 #define MAX_CLIENT 8
@@ -49,28 +51,49 @@ main(void)
   if(bind(sock_fd,(struct sockaddr*)&addr, (socklen_t)sizeof(addr)) == -1)
   {
     perror("Error connecting to socket: ");
+    close(sock_fd);
     return EXIT_FAILURE;
   }
 
   if(listen(sock_fd, MAX_CLIENT) == -1)
   {
     perror("Error listening: ");
+    close(sock_fd);
     return EXIT_FAILURE;
   }
 
   puts("Listening for any new connections ");
   while(1)
   {
+    int caddr_len = sizeof(client_addr);
     int client = accept(sock_fd, 
         (struct sockaddr*)&client_addr,
-        (socklen_t*) sizeof(client_addr));
+        (socklen_t*)&caddr_len);
 
     if(client == -1)
     {
       perror("Error connecting to client: ");
+      close(sock_fd);
       return EXIT_FAILURE;
     }
 
+    char ip_inet_str[INET_ADDRSTRLEN] = {0};
+    char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
+
+    inet_ntop(AF_INET,
+        (void*)&client_addr,
+        ip_inet_str,
+        (socklen_t)caddr_len);
+
+    inet_ntop(AF_INET6,
+        (void*)&client_addr,
+        ip_inet6_str,
+        (socklen_t)caddr_len);
+
+    printf("\nNew connection to\n\tIPv4: %s\n\tIPv6: %s\n",
+        ip_inet_str,
+        ip_inet6_str);
+    
   }
 
   printf("Hello, World!\n");
