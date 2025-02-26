@@ -17,12 +17,229 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#define SERVER_PORT 8080
+#define SERVER_PORT 8000
 #define MAX_CLIENT 8
+//16kb
+#define BODY_LEN 16384
+//4kb
+#define HEADER_LEN 4096
+
+typedef enum 
+{
+  REQ,
+  ATTR,
+  VAL,
+} header_parse_fsm
+
+// supported headers, any others will return a 404
+typedef enum {
+  // only GET for now
+  GET,
+} requests_t;
+
+typedef enum 
+{
+  SCANNING,
+  CR,
+  LF,
+  FOUND
+} HTTP_CRLF_fsm;
+
+typedef struct header_info
+{
+  requests_t request;
+  char* path;
+  char* ua;
+  char* accept;
+} header_info_t;
+
+// for each connection
+typedef struct connect_args
+{
+  int client_fd;
+  void* client_addr;
+  socklen_t caddr_len;
+} connect_args_t;
+
+static const char header_fields[] = {"User-Agent", "Accept", "Connection"};
+static const size_t header_lens[] = {10,6,10}
+static const size_t header_fields_len = 3;
+
+void client_connect(void* args);
+void read_header(char* buff,int client);
+int is_complete_header(char* buff, int n);
+header_info_t* parse_header(char* buff);
+int is_header_field(char* field);
+
+// return index of header_field or -1 if none
+int
+is_header_field(char* field)
+{
+  int pos = -1;
+  for(size_t i = 0; i < header_fields_len; ++i)
+    {
+      if(strcmp(field,header_fields[i],header_lens[i]) == 0)
+        {
+          pos = i;
+          break;
+        }
+    }
+  return posl
+}
+
+header_info_t*
+parse_header(char* buff)
+{
+  header_info_t* h_info = malloc(sizeof(header_info_t));
+
+  char* line = strtok(buff,"\n");
+  do
+    {
+      char* field = strtok(NULL ,": ");
+      do
+        {
+          printf("%s\n",field);
+
+          field = strtok(NULL ,":");
+        }
+      while(field);
+      line = strtok(NULL," \n");
+    }
+  while(line);
+
+  return h_info;
+}
+
+//return position of CRLF, otherwise return -1
+int
+is_complete_header(char* buff, int n)
+{
+  HTTP_CRLF_fsm state = SCANNING;
+  int position = -1;
+  int cr_ctr = 0;
+  int lf_ctr = 0;
+  for(int i = 0; i < n + 1; ++i)
+    {
+      HTTP_CRLF_fsm nstate = SCANNING;
+      char c = buff[i];
+
+      switch(state)
+      {
+        case(SCANNING):
+          if(c == '\r')   
+            {
+              nstate = CR;
+              cr_ctr++;
+            } 
+          else 
+            {
+              nstate = SCANNING;
+            }
+          break;
+        case(CR):
+          if(c == '\n' && (cr_ctr == 2 && lf_ctr == 1)) 
+            {
+              position = i - 3;
+              nstate = FOUND;
+            } 
+          else if (c == '\n')
+            {
+              nstate = LF;
+              lf_ctr++;
+            } 
+          else 
+            {
+              nstate = SCANNING;
+              cr_ctr = 0;
+              lf_ctr = 0;
+            }
+          break;
+        case(LF):
+          if (c == '\r' && (cr_ctr == 1 && lf_ctr == 1)) 
+            {
+              nstate = CR;
+              cr_ctr++;
+            }
+          else 
+            {
+              nstate = SCANNING;
+              cr_ctr = 0;
+              lf_ctr = 0;
+            }
+          break;
+        case(FOUND):
+          // 4 positions away from current index
+          return position;
+      }
+
+      state = nstate;
+    }
+
+  return position;
+}
+
+// fill buff* with header information
+void 
+read_header(char* buff,int client) 
+{
+  int complete = 0;
+  size_t offset = 0;
+  do 
+    {
+      size_t n = recv(client, buff+offset, HEADER_LEN-offset, 0);
+      // pos is the bytes up to CRLF
+      int pos = is_complete_header(buff,(int)n);
+      if (pos > 0) 
+        {
+          buff[pos] = '\0';
+          complete = 1;
+        } 
+      else 
+        {
+          offset += n;
+        }
+    } 
+  while(!complete);
+}
+
+
+void
+client_connect(void* args) 
+{
+  connect_args_t* connect_args = (connect_args_t*)args;
+
+  // get client ip
+  char ip_inet_str[INET_ADDRSTRLEN] = {0};
+  char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
+
+  inet_ntop(AF_INET,
+      connect_args->client_addr,
+      ip_inet_str,
+      connect_args->caddr_len);
+
+  inet_ntop(AF_INET6,
+      connect_args->client_addr,
+      ip_inet6_str,
+      connect_args->caddr_len);
+
+  printf("\nNew connection to\n\tIPv4: %s\n\tIPv6: %s\n",
+      ip_inet_str,
+      ip_inet6_str);
+
+  // read header
+  char* header_buff = realloc(NULL,HEADER_LEN);
+  // header_buff to contain header string, terminated with \0
+  read_header(header_buff,connect_args->client_fd);
+
+  // parse information we care about in the header
+  header_info_t* info = parse_header(header_buff);
+
+}
 
 int
 main(void)
@@ -37,65 +254,66 @@ main(void)
     0,
   };
 
-  struct sockaddr_in6 client_addr;
 
   int sock_fd = socket(AF_INET6, SOCK_STREAM, 0);
 
-  int flag = 1;
-  if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag)) == -1)
-  {
-    perror("Error assigning socket options: ");
-    return EXIT_FAILURE;
-  }
+  int set = 1;
+  if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) == -1)
+    {
+      perror("Error assigning socket options: ");
+      return EXIT_FAILURE;
+    }
+
+  int unset = 0;
+  if(setsockopt(sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, &unset, sizeof(unset)) == -1)
+    {
+      perror("Error assigning socket options: ");
+      return EXIT_FAILURE;
+    }
 
   if(bind(sock_fd,(struct sockaddr*)&addr, (socklen_t)sizeof(addr)) == -1)
-  {
-    perror("Error connecting to socket: ");
-    close(sock_fd);
-    return EXIT_FAILURE;
-  }
-
-  if(listen(sock_fd, MAX_CLIENT) == -1)
-  {
-    perror("Error listening: ");
-    close(sock_fd);
-    return EXIT_FAILURE;
-  }
-
-  puts("Listening for any new connections ");
-  while(1)
-  {
-    int caddr_len = sizeof(client_addr);
-    int client = accept(sock_fd, 
-        (struct sockaddr*)&client_addr,
-        (socklen_t*)&caddr_len);
-
-    if(client == -1)
     {
-      perror("Error connecting to client: ");
+      perror("Error connecting to socket: ");
       close(sock_fd);
       return EXIT_FAILURE;
     }
 
-    char ip_inet_str[INET_ADDRSTRLEN] = {0};
-    char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
+  if(listen(sock_fd, MAX_CLIENT) == -1)
+    {
+      perror("Error listening: ");
+      close(sock_fd);
+      return EXIT_FAILURE;
+    }
 
-    inet_ntop(AF_INET,
+  puts("Listening for any new connections ");
+
+  while(1)
+    {
+
+      struct sockaddr_in6 client_addr;
+
+
+      int caddr_len = sizeof(client_addr);
+      int client = accept(sock_fd, 
+          (struct sockaddr*)&client_addr,
+          (socklen_t*)&caddr_len);
+      puts("attempting to connect");
+      if(client == -1)
+        {
+          perror("Error connecting to client: ");
+          close(sock_fd);
+          return EXIT_FAILURE;
+        }
+
+      connect_args_t args = {
+        client,     
         (void*)&client_addr,
-        ip_inet_str,
-        (socklen_t)caddr_len);
+        (socklen_t)caddr_len
+      };
 
-    inet_ntop(AF_INET6,
-        (void*)&client_addr,
-        ip_inet6_str,
-        (socklen_t)caddr_len);
+      client_connect((void*)&args);
 
-    printf("\nNew connection to\n\tIPv4: %s\n\tIPv6: %s\n",
-        ip_inet_str,
-        ip_inet6_str);
-    
-  }
+    }
 
-  printf("Hello, World!\n");
   return 0;
 }
