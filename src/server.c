@@ -29,18 +29,29 @@
 //4kb
 #define HEADER_LEN 4096
 
+typedef enum
+{
+  ERROR = -1,
+  REQ,
+  PATH,
+  VERSION,
+  DONE,
+} req_line_fsm;
+
 typedef enum 
 {
-  REQ,
-  ATTR,
-  VAL,
-} header_parse_fsm
+  IGNORE = -1, // ignored fields
+  REQUEST_LINE, // obtain request type, should be first
+  ATTR, // User-Agent, Accept, Connection
+  VAL, // ie. Mozilla 5.0..., text/html, keep-alive,
+} header_parse_fsm;
 
 // supported headers, any others will return a 404
 typedef enum {
+  NOT_SUPPORTED = -1,
   // only GET for now
   GET,
-} requests_t;
+} request_t;
 
 typedef enum 
 {
@@ -50,10 +61,16 @@ typedef enum
   FOUND
 } HTTP_CRLF_fsm;
 
+typedef struct request_line
+{
+  request_t request;
+  char* path;
+  char* version;
+} request_line_t;
+
 typedef struct header_info
 {
-  requests_t request;
-  char* path;
+  request_line_t request_line;
   char* ua;
   char* accept;
 } header_info_t;
@@ -66,15 +83,106 @@ typedef struct connect_args
   socklen_t caddr_len;
 } connect_args_t;
 
-static const char header_fields[] = {"User-Agent", "Accept", "Connection"};
-static const size_t header_lens[] = {10,6,10}
+static const char* header_fields[] = {"User-Agent", "Accept", "Connection"};
+static const size_t header_lens[] = {10,6,10};
 static const size_t header_fields_len = 3;
+
+static const char* allowed_rqs[] = {"GET"}; // Only GET for now
+static const size_t rq_lens[] = {3};
+static const size_t allowed_reqs_len = 1;
+
+static const char* allowed_paths[] = {"/", "/index.html", "index.html", "/styles.css", "styles.css"};
+static const size_t allowed_paths_len = 5;
 
 void client_connect(void* args);
 void read_header(char* buff,int client);
 int is_complete_header(char* buff, int n);
 header_info_t* parse_header(char* buff);
 int is_header_field(char* field);
+request_t is_allowed_req(char* field);
+request_line_t parse_req_line(char* line);
+
+request_line_t
+parse_req_line(char* line)
+{
+  request_line_t req_line;
+  
+  char* tok = strtok(line, " ");
+  req_line_fsm state =  REQ;
+
+  do
+    {
+      req_line_fsm nstate = ERROR;
+      switch(state)
+        {
+          case(ERROR):
+              puts("ERROR");
+              return req_line;
+            break;
+          case(REQ):
+            {
+              request_t req = is_allowed_req(tok);
+              req_line.request = req;        
+              if(!(req < 0))
+                {
+                  nstate = PATH;
+                }
+              else
+                {
+                  nstate = ERROR;   
+                }
+              break;
+            }
+          case(PATH):
+            {
+              char* path = malloc(strlen(tok));
+              if(path)
+                {
+                  memcpy(path, tok, strlen(tok));
+                }
+              req_line.path = path;
+              nstate = VERSION;
+              break;
+            }
+          case(VERSION):
+            {
+              char* ver = malloc(strlen(tok));
+              if(ver)
+                {
+                  memcpy(ver, tok, strlen(tok));
+                }
+              req_line.version= ver;
+              nstate = DONE;
+              break;
+            }
+          // should have exited by now but just to be sure i dont process garbage
+          case(DONE): 
+            return req_line;
+        }
+      tok = strtok(NULL, " ");
+      state = nstate;
+    }
+  while(tok);
+
+  return req_line;
+}
+
+// return index of request type, otherwise, -1 of not allowed
+request_t
+is_allowed_req(char* req)
+{
+  int pos = -1;
+  for(size_t i = 0; i < allowed_reqs_len; ++i)
+    {
+      if(strcmp(req,allowed_rqs[i]) == 0)
+        {
+          pos = i;
+          break;
+        }
+    }
+  return (request_t)pos;
+}
+
 
 // return index of header_field or -1 if none
 int
@@ -83,39 +191,75 @@ is_header_field(char* field)
   int pos = -1;
   for(size_t i = 0; i < header_fields_len; ++i)
     {
-      if(strcmp(field,header_fields[i],header_lens[i]) == 0)
+      if(strcmp(field,header_fields[i]) == 0)
         {
           pos = i;
           break;
         }
     }
-  return posl
+  return pos;
 }
 
 header_info_t*
 parse_header(char* buff)
 {
   header_info_t* h_info = malloc(sizeof(header_info_t));
+  header_parse_fsm state = REQUEST_LINE;
 
   char* line = strtok(buff,"\n");
-  do
-    {
-      char* field = strtok(NULL ,": ");
-      do
-        {
-          printf("%s\n",field);
 
-          field = strtok(NULL ,":");
+  header_parse_fsm nstate = IGNORE;
+  char* save;
+  puts("");
+  while(line)
+    {
+      switch(state)
+        {
+          case(REQUEST_LINE):
+            {
+              // offset current line + 1(delim) to proceed to next line
+              save = line + strlen(line) + 1;
+              char* line_cpy = malloc(strlen(line));
+              memcpy(line_cpy, line, strlen(line));
+
+              h_info->request_line = parse_req_line(line_cpy);
+              free(line_cpy);
+              nstate = ATTR;
+
+              break;
+            }
+          case(ATTR):
+            {
+              // save current start of line position
+              
+              line = strtok(save, "\n");
+              char* field = strtok(NULL,":");
+              save = field + strlen(field) + 1;
+
+              if(is_header_field(field) >= 0)
+                {
+                  printf("%s\n",field);
+                  line=strtok(NULL,":");
+                  nstate = VAL;
+                }
+              break;
+            }
+          case(VAL):
+            {
+              printf("%s\n END",line);
+              nstate = ATTR;
+              break;
+            }
         }
-      while(field);
-      line = strtok(NULL," \n");
+      state = nstate;
     }
-  while(line);
+
+  puts("done");
 
   return h_info;
 }
 
-//return position of CRLF, otherwise return -1
+//return the first position of CRLF, otherwise return -1
 int
 is_complete_header(char* buff, int n)
 {
@@ -123,7 +267,7 @@ is_complete_header(char* buff, int n)
   int position = -1;
   int cr_ctr = 0;
   int lf_ctr = 0;
-  for(int i = 0; i < n + 1; ++i)
+  for(int i = 0; i < n; ++i)
     {
       HTTP_CRLF_fsm nstate = SCANNING;
       char c = buff[i];
@@ -144,6 +288,7 @@ is_complete_header(char* buff, int n)
         case(CR):
           if(c == '\n' && (cr_ctr == 2 && lf_ctr == 1)) 
             {
+              // 3 positions away from current index
               position = i - 3;
               nstate = FOUND;
             } 
@@ -173,7 +318,6 @@ is_complete_header(char* buff, int n)
             }
           break;
         case(FOUND):
-          // 4 positions away from current index
           return position;
       }
 
@@ -235,7 +379,7 @@ client_connect(void* args)
   char* header_buff = realloc(NULL,HEADER_LEN);
   // header_buff to contain header string, terminated with \0
   read_header(header_buff,connect_args->client_fd);
-
+  printf("%s\n",header_buff);
   // parse information we care about in the header
   header_info_t* info = parse_header(header_buff);
 
