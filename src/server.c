@@ -44,6 +44,7 @@ typedef enum
   REQUEST_LINE, // obtain request type, should be first
   ATTR, // User-Agent, Accept, Connection
   VAL, // ie. Mozilla 5.0..., text/html, keep-alive,
+  VALS // if comma seperated ie. text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
 } header_parse_fsm;
 
 // supported headers, any others will return a 404
@@ -189,6 +190,10 @@ int
 is_header_field(char* field)
 {
   int pos = -1;
+  if(!field)
+    {
+      return pos;
+    }
   for(size_t i = 0; i < header_fields_len; ++i)
     {
       if(strcmp(field,header_fields[i]) == 0)
@@ -204,14 +209,16 @@ header_info_t*
 parse_header(char* buff)
 {
   header_info_t* h_info = malloc(sizeof(header_info_t));
-  header_parse_fsm state = REQUEST_LINE;
 
   char* line = strtok(buff,"\n");
 
+  header_parse_fsm state = REQUEST_LINE;
   header_parse_fsm nstate = IGNORE;
   char* save;
+  char* field = "";
+  char* val = "";
   puts("");
-  while(line)
+  while(line && val && field)
     {
       switch(state)
         {
@@ -230,30 +237,56 @@ parse_header(char* buff)
             }
           case(ATTR):
             {
-              // save current start of line position
               
-              line = strtok(save, "\n");
-              char* field = strtok(NULL,":");
-              save = field + strlen(field) + 1;
+              // check to make sure they are not NULL (end of request)
+              line  = (save)? strtok(save,"\n"): NULL;
+              save = (line)? line + strlen(line) + 1: NULL;
+              field = (line)? strtok(line,": "): NULL;
 
-              if(is_header_field(field) >= 0)
+              if(is_header_field(line) >= 0)
                 {
                   printf("%s\n",field);
-                  line=strtok(NULL,":");
                   nstate = VAL;
                 }
               break;
             }
           case(VAL):
             {
-              printf("%s\n END",line);
+              // parse content after : 
+              val = strtok(NULL,": ");
+              printf("%s\n\n",val);
               nstate = ATTR;
+
+              if(strncmp("Accept",field,6) == 0)
+                {
+                  nstate = VALS;
+                }
+              else if(strncmp("Connection",field,10) == 0)
+                {
+
+                }
+              else if(strncmp("User-Agent"))
+                {
+
+                }
               break;
+            }
+          case(VALS):
+            {
+              // get information seperated by commas
+              char* info = strtok(val,",");
+              
+              do
+                {
+                  printf("%s\n",info);
+                  info = strtok(NULL,",");
+                }
+              while(info);
+              nstate = ATTR;
             }
         }
       state = nstate;
     }
-
   puts("done");
 
   return h_info;
@@ -273,53 +306,54 @@ is_complete_header(char* buff, int n)
       char c = buff[i];
 
       switch(state)
-      {
-        case(SCANNING):
-          if(c == '\r')   
-            {
-              nstate = CR;
-              cr_ctr++;
-            } 
-          else 
-            {
-              nstate = SCANNING;
-            }
-          break;
-        case(CR):
-          if(c == '\n' && (cr_ctr == 2 && lf_ctr == 1)) 
-            {
-              // 3 positions away from current index
-              position = i - 3;
-              nstate = FOUND;
-            } 
-          else if (c == '\n')
-            {
-              nstate = LF;
-              lf_ctr++;
-            } 
-          else 
-            {
-              nstate = SCANNING;
-              cr_ctr = 0;
-              lf_ctr = 0;
-            }
-          break;
-        case(LF):
-          if (c == '\r' && (cr_ctr == 1 && lf_ctr == 1)) 
-            {
-              nstate = CR;
-              cr_ctr++;
-            }
-          else 
-            {
-              nstate = SCANNING;
-              cr_ctr = 0;
-              lf_ctr = 0;
-            }
-          break;
-        case(FOUND):
-          return position;
-      }
+        {
+          case(SCANNING):
+            if(c == '\r')   
+              {
+                nstate = CR;
+                cr_ctr++;
+              } 
+            else 
+              {
+                nstate = SCANNING;
+              }
+            break;
+          case(CR):
+            if(c == '\n' && (cr_ctr == 2 && lf_ctr == 1)) 
+              {
+                // \r\n\r\n
+                // *     ^  3 positions away from current index 
+                position = i - 3;
+                nstate = FOUND;
+              } 
+            else if (c == '\n')
+              {
+                nstate = LF;
+                lf_ctr++;
+              } 
+            else 
+              {
+                nstate = SCANNING;
+                cr_ctr = 0;
+                lf_ctr = 0;
+              }
+            break;
+          case(LF):
+            if (c == '\r' && (cr_ctr == 1 && lf_ctr == 1)) 
+              {
+                nstate = CR;
+                cr_ctr++;
+              }
+            else 
+              {
+                nstate = SCANNING;
+                cr_ctr = 0;
+                lf_ctr = 0;
+              }
+            break;
+          case(FOUND):
+            return position;
+        }
 
       state = nstate;
     }
