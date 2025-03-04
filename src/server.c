@@ -40,7 +40,6 @@ typedef enum
 
 typedef enum 
 {
-  IGNORE = -1, // ignored fields
   REQUEST_LINE, // obtain request type, should be first
   ATTR, // User-Agent, Accept, Connection
   VAL, // ie. Mozilla 5.0..., text/html, keep-alive,
@@ -72,8 +71,9 @@ typedef struct request_line
 typedef struct header_info
 {
   request_line_t request_line;
-  char* ua;
-  char* accept;
+  char* connection;
+  char* user_agent;
+  char** accept_mime;
 } header_info_t;
 
 // for each connection
@@ -85,16 +85,15 @@ typedef struct connect_args
 } connect_args_t;
 
 static const char* header_fields[] = {"User-Agent", "Accept", "Connection"};
-static const size_t header_lens[] = {10,6,10};
 static const size_t header_fields_len = 3;
 
 static const char* allowed_rqs[] = {"GET"}; // Only GET for now
-static const size_t rq_lens[] = {3};
 static const size_t allowed_reqs_len = 1;
 
 static const char* allowed_paths[] = {"/", "/index.html", "index.html", "/styles.css", "styles.css"};
 static const size_t allowed_paths_len = 5;
 
+char* strdup(const char* s);
 void client_connect(void* args);
 void read_header(char* buff,int client);
 int is_complete_header(char* buff, int n);
@@ -103,11 +102,40 @@ int is_header_field(char* field);
 request_t is_allowed_req(char* field);
 request_line_t parse_req_line(char* line);
 
+// since C11 does not have strdup
+char*
+strdup(const char* src)
+{
+  // include '\0'
+  size_t n = strlen(src) + 1;
+
+  // should not be larger than 128
+  if (src == NULL || n > 128)
+    {
+      return NULL;
+    }
+
+  char* dest = malloc(n);
+
+  if(dest == NULL)
+    {
+      return NULL;
+    }
+
+  return memcpy(dest,src,n);
+
+
+
+}
+
 request_line_t
 parse_req_line(char* line)
 {
   request_line_t req_line;
   
+  // first line info deliminated by space
+  // GET / HTTP/1.1
+  // REQ PATH VERSION
   char* tok = strtok(line, " ");
   req_line_fsm state =  REQ;
 
@@ -208,12 +236,14 @@ is_header_field(char* field)
 header_info_t*
 parse_header(char* buff)
 {
-  header_info_t* h_info = malloc(sizeof(header_info_t));
+  header_info_t* header_info = malloc(sizeof(header_info_t));
 
   char* line = strtok(buff,"\n");
 
+  header_info->accept_mime = malloc(sizeof(char*));
+
   header_parse_fsm state = REQUEST_LINE;
-  header_parse_fsm nstate = IGNORE;
+  header_parse_fsm nstate = REQUEST_LINE;
   char* save;
   char* field = "";
   char* val = "";
@@ -229,7 +259,7 @@ parse_header(char* buff)
               char* line_cpy = malloc(strlen(line));
               memcpy(line_cpy, line, strlen(line));
 
-              h_info->request_line = parse_req_line(line_cpy);
+              header_info->request_line = parse_req_line(line_cpy);
               free(line_cpy);
               nstate = ATTR;
 
@@ -257,31 +287,39 @@ parse_header(char* buff)
               printf("%s\n\n",val);
               nstate = ATTR;
 
-              if(strncmp("Accept",field,6) == 0)
+              if(strncmp("Accept",field,7) == 0)
                 {
                   nstate = VALS;
                 }
-              else if(strncmp("Connection",field,10) == 0)
+              else if(strncmp("Connection",field,11) == 0)
                 {
 
                 }
-              else if(strncmp("User-Agent"))
+              else if(strncmp("User-Agent",field,11) == 0)
                 {
 
                 }
+
               break;
             }
+
           case(VALS):
             {
               // get information seperated by commas
               char* info = strtok(val,",");
+
               
+              size_t i = 0;
               do
                 {
-                  printf("%s\n",info);
+                  header_info->accept_mime = realloc(header_info->accept_mime, 
+                                                 (i+1)*sizeof(char*));
+                  header_info->accept_mime[i] = strdup(info);
                   info = strtok(NULL,",");
+                  i++;
                 }
               while(info);
+              header_info->accept_mime[i] = NULL;
               nstate = ATTR;
             }
         }
@@ -289,7 +327,7 @@ parse_header(char* buff)
     }
   puts("done");
 
-  return h_info;
+  return header_info;
 }
 
 //return the first position of CRLF, otherwise return -1
