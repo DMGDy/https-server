@@ -72,7 +72,6 @@ typedef struct header_info
 {
   request_line_t request_line;
   char* connection;
-  char* user_agent;
   char** accept_mime;
 } header_info_t;
 
@@ -84,8 +83,8 @@ typedef struct connect_args
   socklen_t caddr_len;
 } connect_args_t;
 
-static const char* header_fields[] = {"User-Agent", "Accept", "Connection"};
-static const size_t header_fields_len = 3;
+static const char* header_fields[] = {"Accept", "Connection"};
+static const size_t header_fields_len = 2;
 
 static const char* allowed_rqs[] = {"GET"}; // Only GET for now
 static const size_t allowed_reqs_len = 1;
@@ -93,6 +92,7 @@ static const size_t allowed_reqs_len = 1;
 static const char* allowed_paths[] = {"/", "/index.html", "index.html", "/styles.css", "styles.css"};
 static const size_t allowed_paths_len = 5;
 
+void send_response(header_info_t* header_info);
 char* strdup(const char* s);
 void client_connect(void* args);
 void read_header(char* buff,int client);
@@ -101,6 +101,12 @@ header_info_t* parse_header(char* buff);
 int is_header_field(char* field);
 request_t is_allowed_req(char* field);
 request_line_t parse_req_line(char* line);
+
+void
+send_response(header_info_t* header_info)
+{
+
+}
 
 // since C11 does not have strdup
 char*
@@ -123,8 +129,6 @@ strdup(const char* src)
     }
 
   return memcpy(dest,src,n);
-
-
 
 }
 
@@ -275,7 +279,6 @@ parse_header(char* buff)
 
               if(is_header_field(line) >= 0)
                 {
-                  printf("%s\n",field);
                   nstate = VAL;
                 }
               break;
@@ -284,7 +287,6 @@ parse_header(char* buff)
             {
               // parse content after : 
               val = strtok(NULL,": ");
-              printf("%s\n\n",val);
               nstate = ATTR;
 
               if(strncmp("Accept",field,7) == 0)
@@ -293,13 +295,8 @@ parse_header(char* buff)
                 }
               else if(strncmp("Connection",field,11) == 0)
                 {
-
+                  header_info->connection = strdup(val);
                 }
-              else if(strncmp("User-Agent",field,11) == 0)
-                {
-
-                }
-
               break;
             }
 
@@ -308,7 +305,6 @@ parse_header(char* buff)
               // get information seperated by commas
               char* info = strtok(val,",");
 
-              
               size_t i = 0;
               do
                 {
@@ -325,7 +321,6 @@ parse_header(char* buff)
         }
       state = nstate;
     }
-  puts("done");
 
   return header_info;
 }
@@ -451,9 +446,17 @@ client_connect(void* args)
   char* header_buff = realloc(NULL,HEADER_LEN);
   // header_buff to contain header string, terminated with \0
   read_header(header_buff,connect_args->client_fd);
-  printf("%s\n",header_buff);
   // parse information we care about in the header
-  header_info_t* info = parse_header(header_buff);
+  header_info_t* header_info = parse_header(header_buff);
+
+
+
+  //while(accept)
+  //  {
+  //      printf("%s\n",accept);
+  //      accept = *(header_info->accept_mime + i++);
+  //  }
+
 
 }
 
