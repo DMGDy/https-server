@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width">
+    <title>Dylan Dy's Epic Webpage</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="icon" href="./assets/favicon.ico">
+ </head>
+  <body>
+
+    <div class="header">
+    <center>
+      <h1><a href="/">Dylan Dy's Epic Website</a></h1>
+      <p>this server is running on arch, btw (with <s>SSL</s> TLS)</p>
+    </center>
+    </div>
+
+    </hr >
+    
+    <div class="contact">
+	    email: <span>dylanmatthew<em>[dot]</em>garza<em>[at]</em>gmail<em>[dot]</em>com</span>
+	    </br>
+	    github: <a href="https://github.com/DMGDy">https://github.com/DMGDy</a>
+    </div>
+    
+
+
+    <h2> Summary </h2>
+    <p>
+    	My name is Dylan Dy (or Dylan-Matthew Garza). 
+	I graduated with a degree in Computer Engineering.
+    </p>
+    <p>
+    In terms of technologies, I am very interested in Linux, embedded Linux, programming (systems, embedded, firmware,
+    and occassionally web). I also enjoy teaching those mentioned interests to people and sharing what I know about
+    them.     
+    </p>
+    <p>
+    Other than that, my main "hobby" is<a href="https://en.wikipedia.org/wiki/Olympic_weightlifting">
+    Olympic Weightlifting</a> (also known just as Weightlifting), which should <strong>not</strong>
+    be confused with
+    <a href="https://en.wikipedia.org/wiki/Powerlifting">powerlifting</a>, 
+    <a href="https://en.wikipedia.org/wiki/Bodybuilding">bodybuilding</a>, or
+    <a href="https://en.wikipedia.org/wiki/CrossFit">CrossFit</a>.
+    </p>
+
+    <h2>Software I enjoy</h2>
+    </p>
+    A brief summary of some tools I enjoy using and working with:
+    </br > </br>
+      <li><a href="https://nixos.org/">NixOS</a>(currently as daily driver),
+          <a href="https://artixlinux.org/">Artix Linux</a>, and 
+	  <a href="https://voidlinux.org/">Void Linux</a>.</li>
+      <li> <a href="https://neovim.io/">neovim</a>/<a href="https://www.vim.org/">vim</a> and recently
+	      <a href="https://github.com/nix-community/nixvim">nixvim</a> (neovim configured by nix modules) <s>since
+		      terminal-based text editors are for <strong>serious</strong> software developers.</s></li>
+      <li> <a href="https://en.wikipedia.org/wiki/Ed_(software)">ed</a>: The early text editor that was used to write the 
+	      C programming language and UNIX. Only <strong>REAL</strong> engineers use this one. Despite no code-completion,
+	      integrated debugger, syntax highlighting/checking, it was used to write 2 very relevant technologies of today.
+	      Just a parallel to common modern development environments and the people who use them :-)
+      <li><a href="https://dwm.suckless.org/">dwm</a> (tiling window manager)
+	       but nowadays to be future-proof by using <a href="https://wayland.freedesktop.org/">Wayland</a>, 
+	       I now use <a href="https://hyprland.org/">hyprland</a> (with dwm-like bindings and behavior).</li>
+      <li> <a href="https://github.com/tmux/tmux/wiki">tmux</a> is pretty neat. </li>
+      <li> <a href="https://github.com/elkowar/eww">eww widgets</a>, which is a widget system that allows you to define your own
+                    GTK windows as widgets with its own language which use s-expressions. Similar to other s-expression languages like
+                    like the <a href="https://en.wikipedia.org/wiki/Lisp_(programming_language)">Lisp family</a> of languages,
+                    it has a built-in feature of metaprogramming with using "literals" which call some other program to dynamically
+                    update itself.</li>
+      <li> <a href="https://harelang.org/">Hare Programming Language</a>: A C-like systems programming language. I really just like the Hare mascot.
+    </p>
+    <h2> Projects </h2>
+    These are some projects I am pretty happy about/proud of. 
+    </br></br>
+    <li> <a href="https://github.com/DMGDy/https-server">http(s) server</a>
+	    <details>
+		    <summary>Click to view more details</summary>
+	    <ul>
+		    <li> I aim this project to replace httpd/apache that hosts this website so I can HOPEFULY have
+			    more defined control of connections thats "easier" for me to manage instead of 
+			    figuring out how to configure httpd/apache. Still early in development (as of February 28).
+		    </li>
+		    <li> A big challenge will be implementing SSL/TLS with 
+			    <a href="https://github.com/openssl/openssl">openssl</a> as I have not had
+			    any experience doing so.
+		    </li>
+	    </ul>
+	    </details>
+    </li>
+    <li> <a href="https://github.com/DMGDy/epic-bar-rs">Custom Status Bar in Rust with GTK4</a>
+	    <details>
+		    <summary>Click to view more details</summary>
+		I wanted to implement my own status bar and not rely on as much abstractions as the Eww widgets bar. 
+		This status bar is implemented with GTK4 using the Rust bindings as well as the GTK4-layer-shell rust
+		bindings since this is primarily running on the Hyprland compositor. I plan to one day port it to dwm 
+		with dwm's IPC patch. I port over a lot of the rust code I used for the implementation in the Eww widget
+		bar to this. Luckily the language Eww widgets used was very similar to the relationship to how GTK objects
+		behave.
+
+		<ul>
+
+			<li> This is my daily status-bar I use on my main machine.
+			</li>
+			<li> Reads and writes to <a href="https://wiki.hyprland.org/IPC/">Hyprland's IPC UNIX Sockets</a>
+				to check for workspace/client events to update widgets and to respond to click handlers
+				to switch to workspace/client.
+			</li>
+			<li> Uses seperate thread to periodically check for events to prevent blocking of GKT events (mouse events)
+				and uses Rust's 
+				<a href="https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html">mpsc channels</a>
+				to communicate back to main thread if events occur so widgets can be updated.
+			</li>
+			<li> Obtains average CPU Load from <div class="code">/stat/proc</div> by sampling every second and calculating
+				the deltas between readings determining what percentage of the aggregate CPU time was spent in
+				idle states (<div class="code">idle</div> and <div class="code">irq</div>) vs non-idle states.
+			</li>
+			<li> Obtains CPU frequency by reading the current CPUs' speed under 
+				<div class="code">/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq</div>
+				by opening each file in parallel with a thread handle and summing each frequency and dividing by
+				the number of CPUs (cores).
+			</li>
+			<li> Now contains a <div class="code">flake.nix</div> and 
+				<div class="code">flake.lock</div> for reproducibility for systems that use Nix.
+				Using <a href="https://github.com/edolstra/flake-compat">flake-compat</a> for
+				systems that have not yet started using the flake feature. 
+			</li>
+		</ul>
+	    </details>
+    </li>
+    <li> <a href="https://github.com/DMGDy/eww-bar">custom bar using Eww widgets and custom modules in Rust and C</a> 
+	    <details>
+		    <summary>Click to view more details</summary>
+	    utilizing the <a href="https://github.com/elkowar/eww">
+          Eww</a> widget system. The bar does not use <em>any</em> silly, slow scripts to obtain system
+  information. It instead uses <em>compiled</em> binaries written in <em>real</em> programming languages meant for 
+  creating useful software. The compiled binaries dynamically generate the s-expressions for eww to generate 
+  the widgets with realtime information. The different ones I have written:
+      <ul>
+        <li> <a href="https://github.com/DMGDy/eww-workspaces">eww-workspaces</a>: dynamically shows workspace numbers
+		as clickable buttons, allowing for differentiation between the active one and the open ones. </li>
+	<li> <a href="https://github.com/DMGDy/eww-windows">eww-windows</a>: dynamically shows open windows across 
+		open workspaces, while listing workspaces by most recently used (clickable with icons!).
+	<li> <a href="https://github.com/DMGDy/statuses-rs">statuses(in rust)</a>: Shows SSID, WiFi connection strength,
+		and ram usage.</li>
+	<li> <a href="https://github.com/DMGDy/statuses">statuses(in C)</a>: Shows battery, time, and date.</li>
+
+      </ul>
+	    </details>
+    </li>
+    <li> Multi-input automotive testing device implemented on a heterogenous architecture (ARM Cortex-A7 and ARM Cortex-M4)
+         where I was responsible for multiple Software/embedded Software components.
+	<details> 
+		<summary>Click to view more details</summary>
+	 </br>
+	 A link to the presentation <a href="https://dylxndy.xyz/senior-design-presentation/">here</a>
+
+	 </br>
+
+	 <strong><em>IMPORTANT NOTICE REGARDING THE WORK DONE: ALL ASPECTS OF THE PROJECT DISCUSSED HERE WAS DONE
+		 BY ME AND ME ALONE. ANY PERSON(S) CLAIMING OTHERWISE IS BEING FACETIOUS. THE SOURCE CODE WAS
+		 NOT WRITTEN WITH ASSISTANCE FROM ANY OTHER TEAMMATE. THE PRESENTATION FOR THE PROJECT WAS DONE 
+		 IN COORDINATION BY THE TEAM BUT ITS OVERALL PRODUCT OF IT AND THE PORTIONS DISCUSSED IS DONE BY ME AND 
+		 ME ALONE -- DYLAN-MATTHEW GARZA AKA DYLAN DY 
+	 </strong></em>
+      <ul>
+        <li> <strong>Custom embedded Linux image using the 
+	<a href="https://www.yoctoproject.org/">Yocto Project</a> </strong>
+		 using STM32MP157F-DK2 with custom layer.
+	    <a href="https://github.com/DMGDy/meta-zf-project">here</a>. Built/ installed other software I wrote 
+	    for the project. Uses custom generated device tree from STM32CubeMx and patched stm32mp1 Linux kernel
+	    device tree. Also used a custom defconfig for loading necessary kernel modules.
+	</li>
+	<li> <strong>WebAssembly (WASM) application written in Rust</strong>
+				using the <a href="https://yew.rs/">Yew framework</a>.
+		(link to the repo <a href="https://github.com/DMGDy/zf-yew-app">here</a>) Simple user interface
+		for device testers to interact with to see real time results and remotely test devices.
+	</li>
+	<li> <strong>Custom API application server written in Rust</strong>
+		,meant to interact with server to load ARM Cortex-M4 firmware
+		and communicate to firmware regarding the state of the test, results, and recoreded realtime data
+		saved to the kernel trace buffer. 
+		(link to repo <a href="https://github.com/DMGDy/zf-webserver-app">here</a>. Used the
+		<a href="https://github.com/seanmonstar/warp">warp web server framework</a>, which is a minimal 
+		framework that allows filtering of HTTP requests. 
+    <li> <strong> Microcontroller (ARM M4) Firmware </strong> created communication system between firmware and the 
+                  Rust server API 
+                  using the <a href="https://www.openampproject.org/">OpenAMP Project</a> to communicate over virtual UART.
+                  Communication consisted of status of loading the firmware, confirmation of necessary information for the test,
+                  and test progress. Also contributed to the debugging and development of the firmware that would test devices
+                  and was responsible for porting the necessary RCC configurations to the appropiate DeviceTree so that Linux
+                  may configure the system clock the same way the standalone firmware would on the STM32MP157F-DK2.
+	</details>
+      </ul>
+    </li>
+    <li> <a href="https://github.com/DMGDy/Game-of-Life-hare">Conway's Game of Life in Hare Programming Language</a>: Not really anything too fancy
+        or serious but the language is fun and simple enough and I've never written Conway's game of life before. 
+    </li>
+    <li> <a href="https://github.com/DMGDy/termios-example">snake game using termios</a>: Terminal game snake written in C <strong>without</strong>
+          using ncurses and by manipulating the terminal interface with <a href="https://www.man7.org/linux/man-pages/man3/termios.3.html">
+          termios</a>.
+
+
+    </br></br>
+    <footer>
+      <a href="https://www.vim.org/"><img src="./assets/buttons/vim.gif" alt="IDEs are for noobs" title="not even neovim!"></a>
+      <a href="https://archlinux.org/"><img src="./assets/buttons/archlinux.gif" alt="Arch Linux" title="This is running on arch!"></a>
+      <a href="https://www.kernel.org/"><img src="./assets/buttons/linux_powered.gif" alt="Linux Powered"
+	      title="Currently using LTS kernel 6.6.59"></a>
+      <a href="https://www.gnu.org/software/wget/"><img src="./assets/buttons/wget.gif" alt="wget program" title="How do you think I got these images
+	      on a server? (yes, I am editting on vim through ssh)"></a>
+      <a href="https://www.gnu.org/licenses/agpl-3.0.en.html#license-text">
+        <img src="./assets/buttons/agplv3.png" alt="GNU AGPLv3 License" title="GNU AGPLv3 License"></a>
+      </br>
+      © 2024 <a href="dylxndy.xyz">Dylan Dy's Epic Website</a> | 
+    <a href="https://github.com/DMGDy/dylxndy.xyz">Webpage Source</a>
+     <p xmlns:cc="http://creativecommons.org/ns#">
+      <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/?ref=chooser-v1"
+          target="_blank" 
+          rel="license noopener noreferrer"
+          style="display:inline-block;">CC BY-NC-ND 4.0
+      <img
+          style="height:22px!important;margin-left:3px;vertical-align:text-bottom;"
+          src="https://mirrors.creativecommons.org/presskit/icons/cc.svg?ref=chooser-v1"
+          alt="">
+      <img
+          style="height:22px!important;margin-left:3px;vertical-align:text-bottom;"
+          src="https://mirrors.creativecommons.org/presskit/icons/by.svg?ref=chooser-v1"
+          alt="">
+      <img
+          style="height:22px!important;margin-left:3px;vertical-align:text-bottom;"
+          src="https://mirrors.creativecommons.org/presskit/icons/nc.svg?ref=chooser-v1"
+          alt="">
+      <img
+          style="height:22px!important;margin-left:3px;vertical-align:text-bottom;"
+          src="https://mirrors.creativecommons.org/presskit/icons/nd.svg?ref=chooser-v1"
+          alt="">
+    </a>
+    </p>
+      </br>
+      </br>
+    </footer>
+  </body>
+</html>
