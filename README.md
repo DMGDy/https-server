@@ -9,7 +9,7 @@ Would need to do many things for that to work.
 I hopefully can get through most of these. Ordered in what I think in the moment
 is the primary features I need working first. Will update as I find out more specifics.
 
-1. [ ] Parse HTTP Request and deliver HTML
+1. [X] Parse HTTP Request and deliver HTML
     1. [ ] Handle requesting static assets (figuring out MIME types)
 2. [ ] Add SSL/TLS encryption with openssl
 3. [ ] Add concurrency
