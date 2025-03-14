@@ -18,7 +18,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -28,6 +31,11 @@
 #define BODY_LEN 16384
 //4kb
 #define HEADER_LEN 4096
+// count of files that can be sent
+#define ALLOWED_FILES 15
+// max wait time before server disconnects from client
+#define TIMEOUT_DURATION 500000
+
 
 typedef enum
 {
@@ -64,7 +72,7 @@ typedef enum
 typedef struct request_line
 {
   request_t request;
-  char* path;
+  int path;
   char* version;
 } request_line_t;
 
@@ -72,7 +80,7 @@ typedef struct header_info
 {
   request_line_t request_line;
   char* connection;
-  char** accept_mime;
+  char* accept_mime;
 } header_info_t;
 
 // for each connection
@@ -89,23 +97,77 @@ static const size_t header_fields_len = 2;
 static const char* allowed_rqs[] = {"GET"}; // Only GET for now
 static const size_t allowed_reqs_len = 1;
 
-static const char* allowed_paths[] = {"/", "/index.html", "index.html", "/styles.css", "styles.css"};
-static const size_t allowed_paths_len = 5;
+// all files that can be sent 
+static const char* allowed_files[] = 
+  {
+    "error.html", 
+    "", 
+    "index.html", 
+    "styles.css",
+    "assets/android-chrome-192x192.png", 
+    "assets/android-chrome-512x512.png",
+    "assets/apple-touch-icon.png", 
+    "assets/favicon-16x16.png",
+    "assets/favicon-32x32.png", 
+    "assets/favicon.ico",
+    "assets/buttons/agplv3.png",
+    "assets/buttons/archlinux.gif",
+    "assets/buttons/linux_powered.gif", 
+    "assets/buttons/vim.gif",
+    "assets/buttons/wget.gif"
+  };
 
-void send_response(header_info_t* header_info);
+void send_response(header_info_t* header_info, int client);
 char* strdup(const char* s);
 void client_connect(void* args);
-void read_header(char* buff,int client);
+int read_header(char* buff,int client);
 int is_complete_header(char* buff, int n);
 header_info_t* parse_header(char* buff);
 int is_header_field(char* field);
+int is_image(int pos);
 request_t is_allowed_req(char* field);
-request_line_t parse_req_line(char* line);
+int get_req_file(char* requested);
 
 void
-send_response(header_info_t* header_info)
+send_response(header_info_t* header_info, int client)
 {
+  int file;
+  int file_index = header_info->request_line.path;
+  file_index = (file_index == 1)? 2: file_index;
+  // open requested file
+      if((file = open(allowed_files[file_index], O_RDONLY)) < 0) 
+        {
+          perror("Error opening: ");
+          return;
+        }
+      // get file size
+      struct stat stat;
+      fstat(file, &stat);
 
+      // construct response header
+      char response[HEADER_LEN] = {0};
+
+      snprintf(response,
+          HEADER_LEN,
+          "HTTP/1.1 200 OK\n"
+          "Server: custom-server (Linux)\n"
+          "Accept-Ranges: bytes\n"
+          "Connection: keep-alive\n"
+          "Content-Length: %d\n"
+          "Content-Type: %s\n"
+          "\r\n\r\n",
+          (int)stat.st_size,header_info->accept_mime
+      );
+      
+      printf("%s\n",response);
+
+      send(client, response, strlen(response), 0);
+
+
+      ssize_t n = sendfile(client, file, NULL, (size_t)stat.st_size);
+
+      printf("\n\nbytes sent: %zd\n\n", n);
+      close(file);
 }
 
 // since C11 does not have strdup
@@ -130,6 +192,24 @@ strdup(const char* src)
 
   return memcpy(dest,src,n);
 
+}
+
+// return index of what file was requested, if nothing, send error.html
+int
+get_req_file(char* requested)
+{
+  for(int i = 1; i < ALLOWED_FILES; ++i)
+    {
+      // discard first '/'
+      printf("%s ?= %s\n",requested+1,allowed_files[i]);
+      if (strcmp(requested+1, allowed_files[i]) == 0)
+        {
+          return i;
+        }
+    }
+  puts("File not found");
+
+  return 0;
 }
 
 request_line_t
@@ -173,7 +253,7 @@ parse_req_line(char* line)
                 {
                   memcpy(path, tok, strlen(tok));
                 }
-              req_line.path = path;
+              req_line.path = get_req_file(path);
               nstate = VERSION;
               break;
             }
@@ -198,6 +278,20 @@ parse_req_line(char* line)
   while(tok);
 
   return req_line;
+}
+
+// return 0 if 'pos' provides a file of an image type
+int
+is_image(int pos)
+{
+  size_t len = strlen(allowed_files[pos]);
+  if(strcmp(allowed_files[pos]+(len-3),"gif") == 0||
+      strcmp(allowed_files[pos]+(len-3),"ico") == 0||
+      strcmp(allowed_files[pos]+(len-3),"png") == 0)
+    {
+      return 0;
+    }
+  return 1;
 }
 
 // return index of request type, otherwise, -1 of not allowed
@@ -289,11 +383,11 @@ parse_header(char* buff)
               val = strtok(NULL,": ");
               nstate = ATTR;
 
-              if(strncmp("Accept",field,7) == 0)
+              if(strcmp("Accept",field) == 0)
                 {
                   nstate = VALS;
                 }
-              else if(strncmp("Connection",field,11) == 0)
+              else if(strcmp("Connection",field) == 0)
                 {
                   header_info->connection = strdup(val);
                 }
@@ -302,20 +396,37 @@ parse_header(char* buff)
 
           case(VALS):
             {
-              // get information seperated by commas
+              // get the first accepted type
               char* info = strtok(val,",");
-
-              size_t i = 0;
-              do
+              // need to determine what type of image file
+              // replace avif in 'image/avif'
+              // favicon.ico == image/x-icon
+              // *.png == image/png
+              // *.gif == image/gif
+              int af_pos = header_info->request_line.path;
+              if (is_image(af_pos) == 0)
                 {
-                  header_info->accept_mime = realloc(header_info->accept_mime, 
-                                                 (i+1)*sizeof(char*));
-                  header_info->accept_mime[i] = strdup(info);
-                  info = strtok(NULL,",");
-                  i++;
+                  char actual_type[16] = "image/";   
+                  size_t len = strlen(allowed_files[af_pos]);
+
+                  if(strcmp(allowed_files[af_pos]+(len-3), "ico") == 0)
+                    {
+
+                      strcpy(actual_type+6,"x-icon");
+                    }
+                  else
+                    {
+                      strcpy(actual_type+6,allowed_files[af_pos]+(len-3));
+                    }
+
+                  header_info->accept_mime = strdup(actual_type);
+
                 }
-              while(info);
-              header_info->accept_mime[i] = NULL;
+              else
+                {
+                  header_info->accept_mime = strdup(info);
+                }
+
               nstate = ATTR;
             }
         }
@@ -395,14 +506,24 @@ is_complete_header(char* buff, int n)
 }
 
 // fill buff* with header information
-void 
+int 
 read_header(char* buff,int client) 
 {
   int complete = 0;
   size_t offset = 0;
+  size_t timeout = 0;
   do 
     {
       size_t n = recv(client, buff+offset, HEADER_LEN-offset, 0);
+      // if receiving nothing for a while, return -1 to end connection
+      if(n == 0)
+        {
+          timeout++;
+        }
+      if(timeout >= TIMEOUT_DURATION)
+        {
+          return -1;
+        }
       // pos is the bytes up to CRLF
       int pos = is_complete_header(buff,(int)n);
       if (pos > 0) 
@@ -416,8 +537,9 @@ read_header(char* buff,int client)
         }
     } 
   while(!complete);
-}
 
+  return 0;
+}
 
 void
 client_connect(void* args) 
@@ -442,22 +564,30 @@ client_connect(void* args)
       ip_inet_str,
       ip_inet6_str);
 
+  int keep_alive = 0;
   // read header
-  char* header_buff = realloc(NULL,HEADER_LEN);
+  char* header_buff = malloc(HEADER_LEN);
   // header_buff to contain header string, terminated with \0
-  read_header(header_buff,connect_args->client_fd);
-  // parse information we care about in the header
-  header_info_t* header_info = parse_header(header_buff);
+  keep_alive = read_header(header_buff,connect_args->client_fd);
+  if(keep_alive == 0)
+  {
+    printf("%s\n",header_buff);
+
+    // parse information we care about in the header
+    header_info_t* header_info = parse_header(header_buff);
+
+    send_response(header_info, connect_args->client_fd);
+
+    free(header_buff);
+
+    free(header_info->connection);
+    free(header_info->accept_mime);
+    free(header_info->request_line.version);
+    free(header_info);
+  }
 
 
-
-  //while(accept)
-  //  {
-  //      printf("%s\n",accept);
-  //      accept = *(header_info->accept_mime + i++);
-  //  }
-
-
+  puts("Disconnected");
 }
 
 int
@@ -532,6 +662,7 @@ main(void)
 
       client_connect((void*)&args);
 
+      close(client);
     }
 
   return 0;
