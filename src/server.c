@@ -20,8 +20,6 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/socket.h>
-#include <sys/sendfile.h>
-#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -33,6 +31,7 @@
 #define HEADER_LEN 4096
 // count of files that can be sent
 #define ALLOWED_FILES 15
+#define FILE_BUFF_LEN 8192
 // max wait time before server disconnects from client
 #define TIMEOUT_DURATION 500000
 
@@ -131,43 +130,63 @@ int get_req_file(char* requested);
 void
 send_response(header_info_t* header_info, int client)
 {
-  int file;
+  FILE* file;
   int file_index = header_info->request_line.path;
   file_index = (file_index == 1)? 2: file_index;
   // open requested file
-      if((file = open(allowed_files[file_index], O_RDONLY)) < 0) 
+      if(!(file = fopen(allowed_files[file_index], "rb"))) 
         {
           perror("Error opening: ");
           return;
         }
       // get file size
-      struct stat stat;
-      fstat(file, &stat);
 
       // construct response header
       char response[HEADER_LEN] = {0};
 
-      snprintf(response,
-          HEADER_LEN,
-          "HTTP/1.1 200 OK\n"
-          "Server: custom-server (Linux)\n"
-          "Accept-Ranges: bytes\n"
-          "Connection: keep-alive\n"
-          "Content-Length: %d\n"
-          "Content-Type: %s\n"
-          "\r\n\r\n",
-          (int)stat.st_size,header_info->accept_mime
-      );
-      
+      if(file_index != 0)
+        {
+          sprintf(response,
+              "HTTP/1.1 200 OK\n"
+              "Server: epic-server v420.69(Linux)\n"
+              "Accept-Ranges: bytes\n"
+              "Connection: keep-alive\n"
+              "Content-Type: %s\n"
+              "\n",
+              header_info->accept_mime
+              );
+        }
+      else 
+        {
+           sprintf(response,
+              "HTTP/1.1 404 Not Found\n"
+              "Server: epic-server v420.69(Linux)\n"
+              "Accept-Ranges: bytes\n"
+              "Connection: keep-alive\n"
+              "Content-Type: text/html\n"
+              "\n"
+              );
+        }
+
       printf("%s\n",response);
 
-      send(client, response, strlen(response), 0);
+      write(client, response, strlen(response));
 
+      char file_buff[FILE_BUFF_LEN] = {0};
+      size_t n = 0;
+      size_t sent = 0;
+      while((n = fread(file_buff, 1, sizeof(file_buff),file)) > 0)
+        {
+          size_t bytes = 0;
+          if((bytes = send(client, file_buff, n, 0)) != n)
+            {
+              perror("Error error sending file: ");
+            }
+          sent+=bytes;
+        }
 
-      ssize_t n = sendfile(client, file, NULL, (size_t)stat.st_size);
-
-      printf("\n\nbytes sent: %zd\n\n", n);
-      close(file);
+      printf("\n\nbytes sent: %zd\n\n", sent);
+      fclose(file);
 }
 
 // since C11 does not have strdup
@@ -201,7 +220,7 @@ get_req_file(char* requested)
   for(int i = 1; i < ALLOWED_FILES; ++i)
     {
       // discard first '/'
-      printf("%s ?= %s\n",requested+1,allowed_files[i]);
+      printf("%s ?= %s\n",requested,allowed_files[i]);
       if (strcmp(requested+1, allowed_files[i]) == 0)
         {
           return i;
@@ -248,11 +267,8 @@ parse_req_line(char* line)
             }
           case(PATH):
             {
-              char* path = malloc(strlen(tok));
-              if(path)
-                {
-                  memcpy(path, tok, strlen(tok));
-                }
+              char* path = strdup(tok);
+
               req_line.path = get_req_file(path);
               nstate = VERSION;
               break;
@@ -569,9 +585,9 @@ client_connect(void* args)
   char* header_buff = malloc(HEADER_LEN);
   // header_buff to contain header string, terminated with \0
   keep_alive = read_header(header_buff,connect_args->client_fd);
+  printf("%s\n",header_buff);
   if(keep_alive == 0)
   {
-    printf("%s\n",header_buff);
 
     // parse information we care about in the header
     header_info_t* header_info = parse_header(header_buff);
