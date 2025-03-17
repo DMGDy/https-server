@@ -10,7 +10,7 @@ I hopefully can get through most of these. Ordered in what I think in the moment
 is the primary features I need working first. Will update as I find out more specifics.
 
 1. [X] Parse HTTP Request and deliver HTML
-    1. [ ] Handle requesting static assets (figuring out MIME types)
+    1. [X] Send files beyond index.html
 2. [ ] Add SSL/TLS encryption with openssl
 3. [ ] Add concurrency
     1. [ ] Multi-thread for multiple connections (maybe thread pool or semaphore approach)
