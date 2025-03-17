@@ -4,6 +4,14 @@ An HTTP server. I will see how far I can go with its use case.
 Potentially can replace [apache](https://httpd.apache.org/) on my personal website.
 Would need to do many things for that to work.
 
+## Building
+This project uses [tsodings](https://github.com/tsoding) 
+[nob.h](https://github.com/tsoding/nob.h/) for building.
+
+
+Simply run `cc -o nob nob.c` and the binary will build as
+`bin/server`
+
 
 ## TO-DO
 I hopefully can get through most of these. Ordered in what I think in the moment
