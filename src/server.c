@@ -23,6 +23,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <openssl/ssl.h>
+
 #define SERVER_PORT 8000
 #define MAX_CLIENT 8
 //16kb
@@ -34,6 +36,8 @@
 #define FILE_BUFF_LEN 8192
 // max wait time before server disconnects from client
 #define TIMEOUT_DURATION 500000
+#define SSL_CERT_FILE "./cert/cert.pem"
+#define SSL_KEY_FILE "./cert/key.pem"
 
 
 typedef enum
@@ -134,7 +138,7 @@ send_response(header_info_t* header_info, int client)
   int file_index = header_info->request_line.path;
   file_index = (file_index == 1)? 2: file_index;
   // open requested file
-      if(!(file = fopen(allowed_files[file_index], "rb"))) 
+      if(!(file = fopen("dylxndy.xyz"allowed_files[file_index], "rb"))) 
         {
           perror("Error opening: ");
           return;
@@ -650,23 +654,54 @@ main(void)
       return EXIT_FAILURE;
     }
 
+  // set up SSL context
+  SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
+
   puts("Listening for any new connections ");
 
   while(1)
     {
-
       struct sockaddr_in6 client_addr;
 
-
       int caddr_len = sizeof(client_addr);
+
+      puts("Attempting to connect");
       int client = accept(sock_fd, 
           (struct sockaddr*)&client_addr,
           (socklen_t*)&caddr_len);
-      puts("attempting to connect");
+
       if(client == -1)
         {
           perror("Error connecting to client: ");
           close(sock_fd);
+          return EXIT_FAILURE;
+        }
+
+      SSL* ssl = SSL_new(ctx);
+      if (!ssl)
+        {
+          perror("Error establishing TLS connection: ");
+          return EXIT_FAILURE;
+        }
+
+      SSL_set_fd(ssl, client);
+    
+      if(SSL_use_certificate_file(ssl, SSL_CERT_FILE, SSL_FILETYPE_PEM) != 1)
+        {
+          perror("Error loading certificate: ");
+          return EXIT_FAILURE;
+        }
+
+      if(SSL_use_PrivateKey_file(ssl, SSL_KEY_FILE, SSL_FILETYPE_PEM) != 1)
+        {
+          perror("Error loading private key: ");
+          return EXIT_FAILURE;
+        }
+
+      int ret;
+      if((ret = SSL_accept(ssl)) != 1)
+        {
+          fprintf(stderr,"%d Error during TLS handshake with code %d\n",ret, SSL_get_error(ssl, ret));
           return EXIT_FAILURE;
         }
 
@@ -679,6 +714,7 @@ main(void)
       client_connect((void*)&args);
 
       close(client);
+      SSL_free(ssl);
     }
 
   return 0;
