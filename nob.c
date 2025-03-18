@@ -2,6 +2,9 @@
 
 #include "nob.h"
 
+// locally built openssl-3.5
+#define OSSL_DIR "./openssl"
+
 int
 main(int argc, char** argv)
 {
@@ -13,11 +16,13 @@ main(int argc, char** argv)
       "-Wextra", 
       "-Wpedantic", 
       "-std=c11",
-      "-I./openssl/include",
-      "openssl/libssl.a",
+      "-I"OSSL_DIR"/include",
       "-o", 
       "bin/server", 
-      "src/server.c");
+      "src/server.c",
+      OSSL_DIR"/libssl.a",
+      OSSL_DIR"/libcrypto.a"
+      );
   if (!nob_cmd_run_sync(cmd)) return 1;
   return 0;
 }
