@@ -2,3 +2,6 @@
 	path = openssl
 	url = git@github.com:openssl/openssl.git
 	branch = openssl-3.5
+[submodule "dylxndy.xyz"]
+	path = dylxndy.xyz
+	url = ./dylxndy.xyz
