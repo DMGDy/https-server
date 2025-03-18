@@ -120,10 +120,10 @@ static const char* allowed_files[] =
     "assets/buttons/wget.gif"
   };
 
-void send_response(header_info_t* header_info, int client);
+void send_response(SSL* ssl, header_info_t* header_info);
 char* strdup(const char* s);
-void client_connect(void* args);
-int read_header(char* buff,int client);
+void client_connect(SSL* ssl, void* args);
+int read_header(SSL* ssl, char* buff);
 int is_complete_header(char* buff, int n);
 header_info_t* parse_header(char* buff);
 int is_header_field(char* field);
@@ -132,13 +132,13 @@ request_t is_allowed_req(char* field);
 int get_req_file(char* requested);
 
 void
-send_response(header_info_t* header_info, int client)
+send_response(SSL* ssl, header_info_t* header_info)
 {
   FILE* file;
   int file_index = header_info->request_line.path;
   file_index = (file_index == 1)? 2: file_index;
   // open requested file
-      if(!(file = fopen("dylxndy.xyz"allowed_files[file_index], "rb"))) 
+      if(!(file = fopen(allowed_files[file_index], "rb"))) 
         {
           perror("Error opening: ");
           return;
@@ -174,7 +174,7 @@ send_response(header_info_t* header_info, int client)
 
       printf("%s\n",response);
 
-      write(client, response, strlen(response));
+      SSL_write(ssl, response, strlen(response));
 
       char file_buff[FILE_BUFF_LEN] = {0};
       size_t n = 0;
@@ -182,7 +182,7 @@ send_response(header_info_t* header_info, int client)
       while((n = fread(file_buff, 1, sizeof(file_buff),file)) > 0)
         {
           size_t bytes = 0;
-          if((bytes = send(client, file_buff, n, 0)) != n)
+          if((bytes = SSL_write(ssl, file_buff, n)) != n)
             {
               perror("Error error sending file: ");
             }
@@ -527,14 +527,14 @@ is_complete_header(char* buff, int n)
 
 // fill buff* with header information
 int 
-read_header(char* buff,int client) 
+read_header(SSL* ssl, char* buff) 
 {
   int complete = 0;
   size_t offset = 0;
   size_t timeout = 0;
   do 
     {
-      size_t n = recv(client, buff+offset, HEADER_LEN-offset, 0);
+      size_t n = SSL_read(ssl, buff+offset, HEADER_LEN-offset);
       // if receiving nothing for a while, return -1 to end connection
       if(n == 0)
         {
@@ -562,7 +562,7 @@ read_header(char* buff,int client)
 }
 
 void
-client_connect(void* args) 
+client_connect(SSL* ssl, void* args) 
 {
   connect_args_t* connect_args = (connect_args_t*)args;
 
@@ -588,7 +588,7 @@ client_connect(void* args)
   // read header
   char* header_buff = malloc(HEADER_LEN);
   // header_buff to contain header string, terminated with \0
-  keep_alive = read_header(header_buff,connect_args->client_fd);
+  keep_alive = read_header(ssl, header_buff);
   printf("%s\n",header_buff);
   if(keep_alive == 0)
   {
@@ -596,7 +596,7 @@ client_connect(void* args)
     // parse information we care about in the header
     header_info_t* header_info = parse_header(header_buff);
 
-    send_response(header_info, connect_args->client_fd);
+    send_response(ssl, header_info);
 
     free(header_buff);
 
@@ -673,15 +673,14 @@ main(void)
       if(client == -1)
         {
           perror("Error connecting to client: ");
-          close(sock_fd);
-          return EXIT_FAILURE;
+          goto error;
         }
 
       SSL* ssl = SSL_new(ctx);
       if (!ssl)
         {
           perror("Error establishing TLS connection: ");
-          return EXIT_FAILURE;
+          goto error;
         }
 
       SSL_set_fd(ssl, client);
@@ -689,20 +688,20 @@ main(void)
       if(SSL_use_certificate_file(ssl, SSL_CERT_FILE, SSL_FILETYPE_PEM) != 1)
         {
           perror("Error loading certificate: ");
-          return EXIT_FAILURE;
+          goto error;
         }
 
       if(SSL_use_PrivateKey_file(ssl, SSL_KEY_FILE, SSL_FILETYPE_PEM) != 1)
         {
           perror("Error loading private key: ");
-          return EXIT_FAILURE;
+          goto error;
         }
 
       int ret;
       if((ret = SSL_accept(ssl)) != 1)
         {
           fprintf(stderr,"%d Error during TLS handshake with code %d\n",ret, SSL_get_error(ssl, ret));
-          return EXIT_FAILURE;
+          goto error;
         }
 
       connect_args_t args = {
@@ -711,7 +710,9 @@ main(void)
         (socklen_t)caddr_len
       };
 
-      client_connect((void*)&args);
+      client_connect(ssl,(void*)&args);
+
+error:
 
       close(client);
       SSL_free(ssl);
