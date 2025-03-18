@@ -1,4 +1,4 @@
-# Dual-stack HTTP(S) server 
+# Dual-stack HTTPS server 
 
 An HTTP server. I will see how far I can go with its use case. 
 Potentially can replace [apache](https://httpd.apache.org/) on my personal website.
@@ -24,3 +24,4 @@ is the primary features I need working first. Will update as I find out more spe
     1. [ ] Multi-thread for multiple connections (maybe thread pool or semaphore approach)
     2. [ ] Potentially move to C [coroutines](https://github.com/tsoding/coroutines). 
     Written by [tsoding](https://github.com/tsoding)
+    3. [ ] Implement async behavior in C with epoll
