@@ -19,7 +19,7 @@ is the primary features I need working first. Will update as I find out more spe
 
 1. [X] Parse HTTP Request and deliver HTML
     1. [X] Send files beyond index.html
-2. [ ] Add SSL/TLS encryption with openssl
+2. [X] Add SSL/TLS encryption with openssl
 3. [ ] Add concurrency
     1. [ ] Multi-thread for multiple connections (maybe thread pool or semaphore approach)
     2. [ ] Potentially move to C [coroutines](https://github.com/tsoding/coroutines). 
