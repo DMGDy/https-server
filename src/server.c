@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #include <openssl/ssl.h>
 
@@ -120,6 +121,8 @@ static const char* allowed_files[] =
     "assets/buttons/wget.gif"
   };
 
+volatile sig_atomic_t shutdown_flag = 0;
+
 void send_response(SSL* ssl, header_info_t* header_info);
 char* strdup(const char* s);
 void client_connect(SSL* ssl, void* args);
@@ -130,6 +133,16 @@ int is_header_field(char* field);
 int is_image(int pos);
 request_t is_allowed_req(char* field);
 int get_req_file(char* requested);
+void sig_handler(int sig);
+
+void
+sig_handler(int sig)
+{
+  if(sig == SIGINT || SIGKILL)
+    {
+      shutdown_flag = 1;
+    }
+}
 
 void
 send_response(SSL* ssl, header_info_t* header_info)
@@ -608,6 +621,7 @@ client_connect(SSL* ssl, void* args)
 int
 main(void)
 {
+
   // ipv6
   struct sockaddr_in6 addr = 
   {
@@ -653,8 +667,10 @@ main(void)
   SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
 
   puts("Listening for any new connections ");
+  // for graceful shutdown_flag
+  signal(SIGINT, sig_handler);
 
-  while(1)
+  while(!shutdown_flag)
     {
       struct sockaddr_in6 client_addr;
 
@@ -706,12 +722,13 @@ main(void)
       };
 
       client_connect(ssl,(void*)&args);
-
 error:
-
       close(client);
       SSL_free(ssl);
     }
+
+  close(sock_fd);
+  SSL_CTX_free(ctx);
 
   return 0;
 }
