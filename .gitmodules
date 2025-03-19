@@ -4,4 +4,5 @@
 	branch = openssl-3.5
 [submodule "dylxndy.xyz"]
 	path = dylxndy.xyz
-	url = ./dylxndy.xyz
+    url = git@github.com:DMGDy/dylxndy.xyz.git
+    branch = main
