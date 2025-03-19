@@ -213,7 +213,7 @@ strdup(const char* src)
       return NULL;
     }
 
-  return memcpy(dest,src,n);
+  return strncpy(dest,src,n);
 
 }
 
@@ -274,16 +274,13 @@ parse_req_line(char* line)
               char* path = strdup(tok);
 
               req_line.path = get_req_file(path);
+              free(path);
               nstate = VERSION;
               break;
             }
           case(VERSION):
             {
-              char* ver = malloc(strlen(tok));
-              if(ver)
-                {
-                  memcpy(ver, tok, strlen(tok));
-                }
+              char* ver = strdup(tok);
               req_line.version= ver;
               nstate = DONE;
               break;
@@ -358,11 +355,9 @@ parse_header(char* buff)
 
   char* line = strtok(buff,"\n");
 
-  header_info->accept_mime = malloc(sizeof(char*));
-
   header_parse_fsm state = REQUEST_LINE;
   header_parse_fsm nstate = REQUEST_LINE;
-  char* save;
+  char* save = "";
   char* field = "";
   char* val = "";
   puts("");
@@ -374,8 +369,9 @@ parse_header(char* buff)
             {
               // offset current line + 1(delim) to proceed to next line
               save = line + strlen(line) + 1;
-              char* line_cpy = malloc(strlen(line));
-              memcpy(line_cpy, line, strlen(line));
+              char* line_cpy = malloc(strlen(line) + 1);
+              strncpy(line_cpy, line, strlen(line));
+              line_cpy[strlen(line)] = 0;
 
               header_info->request_line = parse_req_line(line_cpy);
               free(line_cpy);
@@ -385,9 +381,8 @@ parse_header(char* buff)
             }
           case(ATTR):
             {
-              
               // check to make sure they are not NULL (end of request)
-              line  = (save)? strtok(save,"\n"): NULL;
+              line  = (save && (strlen(save) > 0))? strtok(save,"\n"): NULL;
               save = (line)? line + strlen(line) + 1: NULL;
               field = (line)? strtok(line,": "): NULL;
 
