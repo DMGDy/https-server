@@ -151,59 +151,59 @@ send_response(SSL* ssl, header_info_t* header_info)
   int file_index = header_info->request_line.path;
   file_index = (file_index == 1)? 2: file_index;
   // open requested file
-      if(!(file = fopen(allowed_files[file_index], "rb"))) 
+  if(!(file = fopen(allowed_files[file_index], "rb"))) 
+    {
+      perror("Error opening: ");
+      return;
+    }
+  // get file size
+
+  // construct response header
+  char response[HEADER_LEN] = {0};
+
+  if(file_index != 0)
+    {
+      sprintf(response,
+          "HTTP/1.1 200 OK\n"
+          "Server: epic-server v420.69(Linux)\n"
+          "Accept-Ranges: bytes\n"
+          "Connection: keep-alive\n"
+          "Content-Type: %s\n"
+          "\n",
+          header_info->accept_mime
+          );
+    }
+  else 
+    {
+      sprintf(response,
+          "HTTP/1.1 404 Not Found\n"
+          "Server: epic-server v420.69(Linux)\n"
+          "Accept-Ranges: bytes\n"
+          "Connection: keep-alive\n"
+          "Content-Type: text/html"
+          "\n\n"
+          );
+    }
+
+  printf("%s\n",response);
+
+  SSL_write(ssl, response, strlen(response));
+
+  char file_buff[FILE_BUFF_LEN] = {0};
+  size_t n = 0;
+  size_t sent = 0;
+  while((n = fread(file_buff, 1, sizeof(file_buff),file)) > 0)
+    {
+      size_t bytes = 0;
+      if((bytes = SSL_write(ssl, file_buff, n)) != n)
         {
-          perror("Error opening: ");
-          return;
+          perror("Error error sending file: ");
         }
-      // get file size
+      sent+=bytes;
+    }
 
-      // construct response header
-      char response[HEADER_LEN] = {0};
-
-      if(file_index != 0)
-        {
-          sprintf(response,
-              "HTTP/1.1 200 OK\n"
-              "Server: epic-server v420.69(Linux)\n"
-              "Accept-Ranges: bytes\n"
-              "Connection: keep-alive\n"
-              "Content-Type: %s\n"
-              "\n",
-              header_info->accept_mime
-              );
-        }
-      else 
-        {
-           sprintf(response,
-              "HTTP/1.1 404 Not Found\n"
-              "Server: epic-server v420.69(Linux)\n"
-              "Accept-Ranges: bytes\n"
-              "Connection: keep-alive\n"
-              "Content-Type: text/html\n"
-              "\n"
-              );
-        }
-
-      printf("%s\n",response);
-
-      SSL_write(ssl, response, strlen(response));
-
-      char file_buff[FILE_BUFF_LEN] = {0};
-      size_t n = 0;
-      size_t sent = 0;
-      while((n = fread(file_buff, 1, sizeof(file_buff),file)) > 0)
-        {
-          size_t bytes = 0;
-          if((bytes = SSL_write(ssl, file_buff, n)) != n)
-            {
-              perror("Error error sending file: ");
-            }
-          sent+=bytes;
-        }
-
-      printf("\n\nbytes sent: %zd\n\n", sent);
-      fclose(file);
+  printf("\n\nbytes sent: %zd\n\n", sent);
+  fclose(file);
 }
 
 // since C11 does not have strdup
