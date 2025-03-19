@@ -121,6 +121,8 @@ static const char* allowed_files[] =
     "assets/buttons/wget.gif"
   };
 
+static const char hostname[] = "dylxndy.xyz/";
+
 volatile sig_atomic_t shutdown_flag = 0;
 
 void send_response(SSL* ssl, header_info_t* header_info);
@@ -150,12 +152,22 @@ send_response(SSL* ssl, header_info_t* header_info)
   FILE* file;
   int file_index = header_info->request_line.path;
   file_index = (file_index == 1)? 2: file_index;
+
+  // webpage and related files as subdirectory
+  size_t path_len = strlen(hostname) + strlen(allowed_files[file_index]);
+  char* path = malloc(path_len + 1);
+  strcpy(path, hostname);
+  strcpy(path+strlen(hostname),allowed_files[file_index]);
+  path[path_len] = 0;
+
   // open requested file
-  if(!(file = fopen(allowed_files[file_index], "rb"))) 
+  if(!(file = fopen(path, "rb"))) 
     {
       perror("Error opening: ");
+      free(path);
       return;
     }
+  free(path);
   // get file size
 
   // construct response header
@@ -670,21 +682,27 @@ main(void)
   // for graceful shutdown_flag
   signal(SIGINT, sig_handler);
 
+entrance:
   while(!shutdown_flag)
     {
       struct sockaddr_in6 client_addr;
 
       int caddr_len = sizeof(client_addr);
 
-      puts("Attempting to connect");
       int client = accept(sock_fd, 
           (struct sockaddr*)&client_addr,
           (socklen_t*)&caddr_len);
 
-      if(client == -1)
+      puts("Attempting to connect");
+      if(client == -1 && shutdown_flag)
         {
+          goto entrance;
+        }
+      else if (client == - 1 && !shutdown_flag)
+        {
+
           perror("Error connecting to client: ");
-          goto error;
+          goto entrance;
         }
 
       SSL* ssl = SSL_new(ctx);
@@ -723,7 +741,10 @@ main(void)
 
       client_connect(ssl,(void*)&args);
 error:
-      close(client);
+      if(client != -1)
+        {
+          close(client);
+        }
       SSL_free(ssl);
     }
 
