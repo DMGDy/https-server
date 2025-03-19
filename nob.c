@@ -17,6 +17,7 @@ main(int argc, char** argv)
       "-Wpedantic", 
       "-std=c11",
       "-I"OSSL_DIR"/include",
+      "-g",
       "-o", 
       "bin/server", 
       "src/server.c",
