@@ -23,6 +23,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include <openssl/ssl.h>
 
@@ -33,7 +34,7 @@
 //4kb
 #define HEADER_LEN 4096
 // count of files that can be sent
-#define ALLOWED_FILES 15
+#define ALLOWED_FILES 17
 #define FILE_BUFF_LEN 8192
 // max wait time before server disconnects from client
 #define TIMEOUT_DURATION 500000
@@ -41,7 +42,7 @@
 #define SSL_KEY_FILE "./cert/key.pem"
 
 
-typedef enum
+typedef enum req_line_fsm
 {
   ERROR = -1,
   REQ,
@@ -50,8 +51,9 @@ typedef enum
   DONE,
 } req_line_fsm;
 
-typedef enum 
+typedef enum header_parse_fsm
 {
+  FAILURE = -1,
   REQUEST_LINE, // obtain request type, should be first
   ATTR, // User-Agent, Accept, Connection
   VAL, // ie. Mozilla 5.0..., text/html, keep-alive,
@@ -77,6 +79,7 @@ typedef struct request_line
 {
   request_t request;
   int path;
+  int error;
   char* version;
 } request_line_t;
 
@@ -108,12 +111,14 @@ static const char* allowed_files[] =
     "", 
     "index.html", 
     "styles.css",
+    "favicon.ico",
     "assets/android-chrome-192x192.png", 
     "assets/android-chrome-512x512.png",
     "assets/apple-touch-icon.png", 
     "assets/favicon-16x16.png",
     "assets/favicon-32x32.png", 
     "assets/favicon.ico",
+    "assets/trollface-drift-phonk.gif",
     "assets/buttons/agplv3.png",
     "assets/buttons/archlinux.gif",
     "assets/buttons/linux_powered.gif", 
@@ -150,7 +155,7 @@ void
 send_response(SSL* ssl, header_info_t* header_info)
 {
   FILE* file;
-  int file_index = header_info->request_line.path;
+  int file_index = (header_info != NULL)? header_info->request_line.path: 0;
   file_index = (file_index == 1)? 2: file_index;
 
   // webpage and related files as subdirectory
@@ -188,7 +193,7 @@ send_response(SSL* ssl, header_info_t* header_info)
   else 
     {
       sprintf(response,
-          "HTTP/1.1 404 Not Found\n"
+          "HTTP/1.1 400 Not Found\n"
           "Server: epic-server v420.69(Linux)\n"
           "Accept-Ranges: bytes\n"
           "Connection: keep-alive\n"
@@ -264,6 +269,7 @@ request_line_t
 parse_req_line(char* line)
 {
   request_line_t req_line;
+  req_line.error = 0;
   
   // first line info deliminated by space
   // GET / HTTP/1.1
@@ -277,7 +283,7 @@ parse_req_line(char* line)
       switch(state)
         {
           case(ERROR):
-              puts("ERROR");
+              req_line.error = 1;
               return req_line;
             break;
           case(REQ):
@@ -400,8 +406,15 @@ parse_header(char* buff)
 
               header_info->request_line = parse_req_line(line_cpy);
               free(line_cpy);
-              nstate = ATTR;
 
+              if (header_info->request_line.error)
+                {
+                  nstate = FAILURE;
+                }
+              else
+                {
+                  nstate = ATTR;
+                }
               break;
             }
           case(ATTR):
@@ -468,6 +481,11 @@ parse_header(char* buff)
                 }
 
               nstate = ATTR;
+              break;
+            }
+          case(FAILURE):
+            {
+              return NULL;
             }
         }
       state = nstate;
@@ -633,7 +651,6 @@ client_connect(SSL* ssl, void* args)
 int
 main(void)
 {
-
   // ipv6
   struct sockaddr_in6 addr = 
   {
@@ -643,7 +660,6 @@ main(void)
     in6addr_any,
     0,
   };
-
 
   int sock_fd = socket(AF_INET6, SOCK_STREAM, 0);
 
