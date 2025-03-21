@@ -27,6 +27,8 @@
 
 #include <openssl/ssl.h>
 
+#include "config.h"
+
 //16kb
 #define BODY_LEN 16384
 //4kb
@@ -672,7 +674,6 @@ main(void)
   // for graceful shutdown_flag
   signal(SIGINT, sig_handler);
 
-entrance:
   while(!shutdown_flag)
     {
       struct sockaddr_in6 client_addr;
@@ -686,13 +687,13 @@ entrance:
       puts("Attempting to connect");
       if(client == -1 && shutdown_flag)
         {
-          goto entrance;
+          continue;
         }
       else if (client == - 1 && !shutdown_flag)
         {
 
           perror("Error connecting to client: ");
-          goto entrance;
+          continue;
         }
 
       SSL* ssl = SSL_new(ctx);
