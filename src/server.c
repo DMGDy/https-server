@@ -27,20 +27,14 @@
 
 #include <openssl/ssl.h>
 
-#define SERVER_PORT 8000
-#define MAX_CLIENT 8
 //16kb
 #define BODY_LEN 16384
 //4kb
 #define HEADER_LEN 4096
 // count of files that can be sent
-#define ALLOWED_FILES 17
 #define FILE_BUFF_LEN 8192
 // max wait time before server disconnects from client
 #define TIMEOUT_DURATION 500000
-#define SSL_CERT_FILE "./cert/cert.pem"
-#define SSL_KEY_FILE "./cert/key.pem"
-
 
 typedef enum req_line_fsm
 {
@@ -105,27 +99,6 @@ static const char* allowed_rqs[] = {"GET"}; // Only GET for now
 static const size_t allowed_reqs_len = 1;
 
 // all files that can be sent 
-static const char* allowed_files[] = 
-  {
-    "error.html", 
-    "", 
-    "index.html", 
-    "styles.css",
-    "favicon.ico",
-    "assets/android-chrome-192x192.png", 
-    "assets/android-chrome-512x512.png",
-    "assets/apple-touch-icon.png", 
-    "assets/favicon-16x16.png",
-    "assets/favicon-32x32.png", 
-    "assets/favicon.ico",
-    "assets/trollface-drift-phonk.gif",
-    "assets/buttons/agplv3.png",
-    "assets/buttons/archlinux.gif",
-    "assets/buttons/linux_powered.gif", 
-    "assets/buttons/vim.gif",
-    "assets/buttons/wget.gif"
-  };
-
 static const char hostname[] = "dylxndy.xyz/";
 
 volatile sig_atomic_t shutdown_flag = 0;
