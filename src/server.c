@@ -586,12 +586,13 @@ void
 client_connect(SSL* ssl, void* args) 
 {
   connect_args_t* connect_args = (connect_args_t*)args;
+  struct sockaddr_in6* client = connect_args->client_addr;
 
   // get client ip
   char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
 
   inet_ntop(AF_INET6,
-      &connect_args->client_addr,
+      &client->sin6_addr,
       ip_inet6_str,
       INET6_ADDRSTRLEN);
 
