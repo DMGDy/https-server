@@ -185,20 +185,20 @@ send_response(SSL* ssl, header_info_t* header_info)
           "Server: epic-server v420.69(Linux)\n"
           "Accept-Ranges: bytes\n"
           "Connection: keep-alive\n"
-          "Content-Type: %s\n"
-          "\n",
+          "Content-Type: %s"
+          "\r\n\r\n",
           header_info->accept_mime
           );
     }
   else 
     {
       sprintf(response,
-          "HTTP/1.1 400 Not Found\n"
-          "Server: epic-server v420.69(Linux)\n"
+          "HTTP/1.1 400 Error\n"
+          "Server: epic-server v420.69 (Chad Linux)\n"
           "Accept-Ranges: bytes\n"
           "Connection: keep-alive\n"
           "Content-Type: text/html"
-          "\n\n"
+          "\r\n\r\n"
           );
     }
 
@@ -251,6 +251,10 @@ strdup(const char* src)
 int
 get_req_file(char* requested)
 {
+  if(requested == NULL)
+    {
+      return 0;
+    }
   for(int i = 1; i < ALLOWED_FILES; ++i)
     {
       // discard first '/'
@@ -333,6 +337,10 @@ int
 is_image(int pos)
 {
   size_t len = strlen(allowed_files[pos]);
+
+
+  //"assets/buttons/agplv3.png",
+  //                       ^  
   if(strcmp(allowed_files[pos]+(len-3),"gif") == 0||
       strcmp(allowed_files[pos]+(len-3),"ico") == 0||
       strcmp(allowed_files[pos]+(len-3),"png") == 0)
@@ -605,21 +613,14 @@ client_connect(SSL* ssl, void* args)
   connect_args_t* connect_args = (connect_args_t*)args;
 
   // get client ip
-  char ip_inet_str[INET_ADDRSTRLEN] = {0};
   char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
 
-  inet_ntop(AF_INET,
-      connect_args->client_addr,
-      ip_inet_str,
-      connect_args->caddr_len);
-
   inet_ntop(AF_INET6,
-      connect_args->client_addr,
+      &connect_args->client_addr,
       ip_inet6_str,
-      connect_args->caddr_len);
+      INET6_ADDRSTRLEN);
 
-  printf("\nNew connection to\n\tIPv4: %s\n\tIPv6: %s\n",
-      ip_inet_str,
+  printf("\nNew connection to \n\tIPv6: %s\n",
       ip_inet6_str);
 
   int keep_alive = 0;
