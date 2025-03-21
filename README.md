@@ -12,6 +12,11 @@ This project uses [tsodings](https://github.com/tsoding)
 Simply run `cc -o nob nob.c` and the binary will build as
 `bin/server`
 
+## Dependency
+This project uses [openssl](https://www.openssl.org/)(3.5 release) and the build program `nob.c` is default set
+the static library path `libssl.a` and `libcrypto.a` to be in the working
+directory of this project. You may modify it to point to its actual location
+on your machine or build it locally for this program like I did.
 
 ## TO-DO
 I hopefully can get through most of these. Ordered in what I think in the moment
