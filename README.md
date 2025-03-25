@@ -32,4 +32,6 @@ is the primary features I need working first. Will update as I find out more spe
     2. [ ] ~~Potentially move to C [coroutines](https://github.com/tsoding/coroutines).~~
     Written by [tsoding](https://github.com/tsoding)
     3. [ ] Implement async behavior in C with epoll
+6. [ ] Properly respond with file size in order to sustain the connection
+7. [ ] Implement custom allocator ([arena/region](https://en.wikipedia.org/wiki/Region-based_memory_management) allocator using either bump/linear or chunk)
 
