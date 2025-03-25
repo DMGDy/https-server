@@ -20,6 +20,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <signal.h>
@@ -71,12 +72,22 @@ typedef enum
   FOUND
 } HTTP_CRLF_fsm;
 
+// since operations are not guaranteed to finish
+// and i cannot block I/O need to keep track of state
+typedef enum
+{
+  TLS_HANDSHAKE,
+  READ_REQUEST,
+  WRITE_RESPONSE,
+  CLOSE_CONNECTION
+}connect_state_t;
+
 typedef struct request_line
 {
-  request_t request;
+  char* version;
   int path;
   int error;
-  char* version;
+  request_t request;
 } request_line_t;
 
 typedef struct header_info
@@ -89,9 +100,13 @@ typedef struct header_info
 // for each connection
 typedef struct connect_args
 {
-  int client_fd;
+  SSL* ssl;
   void* client_addr;
+  char* rbuff;
+  char* wbuff;
   socklen_t caddr_len;
+  int client_fd;
+  connect_state_t state;
 } connect_args_t;
 
 static const char* header_fields[] = {"Accept", "Connection"};
@@ -116,6 +131,25 @@ int is_image(int pos);
 request_t is_allowed_req(char* field);
 int get_req_file(char* requested);
 void sig_handler(int sig);
+void setnonblocking(int fd);
+
+void setnonblocking(int sock) {
+  int opt;
+
+  opt = fcntl(sock, F_GETFL);
+  if (opt < 0) 
+    {
+      perror("fcntl(F_GETFL) fail.");
+      exit(EXIT_FAILURE);
+    }
+  opt |= O_NONBLOCK;
+  if (fcntl(sock, F_SETFL, opt) < 0) 
+    {
+      perror("fcntl(F_SETFL) fail.");
+      exit(EXIT_FAILURE);
+    }
+}
+
 
 void
 sig_handler(int sig)
@@ -143,7 +177,7 @@ send_response(SSL* ssl, header_info_t* header_info)
   // open requested file
   if(!(file = fopen(path, "rb"))) 
     {
-      perror("Error opening: ");
+      perror("Error opening");
       free(path);
       return;
     }
@@ -189,7 +223,7 @@ send_response(SSL* ssl, header_info_t* header_info)
       size_t bytes = 0;
       if((bytes = SSL_write(ssl, file_buff, n)) != n)
         {
-          perror("Error error sending file: ");
+          perror("Error error sending file");
         }
       sent+=bytes;
     }
@@ -638,35 +672,56 @@ main(void)
     0,
   };
 
-  int sock_fd = socket(AF_INET6, SOCK_STREAM, 0);
+  int listen_sock = socket(AF_INET6,SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
   int set = 1;
-  if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) == -1)
+  if(setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) == -1)
     {
-      perror("Error assigning socket options: ");
+      perror("Error assigning socket options");
       return EXIT_FAILURE;
     }
 
   int unset = 0;
-  if(setsockopt(sock_fd, IPPROTO_IPV6, IPV6_V6ONLY, &unset, sizeof(unset)) == -1)
+  if(setsockopt(listen_sock, IPPROTO_IPV6, IPV6_V6ONLY, &unset, sizeof(unset)) == -1)
     {
-      perror("Error assigning socket options: ");
+      perror("Error assigning socket options");
       return EXIT_FAILURE;
     }
 
-  if(bind(sock_fd,(struct sockaddr*)&addr, (socklen_t)sizeof(addr)) == -1)
+  if(bind(listen_sock,(struct sockaddr*)&addr, (socklen_t)sizeof(addr)) == -1)
     {
-      perror("Error connecting to socket: ");
-      close(sock_fd);
+      perror("Error connecting to socket");
+      close(listen_sock);
       return EXIT_FAILURE;
     }
 
-  if(listen(sock_fd, MAX_CLIENT) == -1)
+  if(listen(listen_sock, MAX_CLIENT) == -1)
     {
-      perror("Error listening: ");
-      close(sock_fd);
+      perror("Error listening");
+      close(listen_sock);
       return EXIT_FAILURE;
     }
+
+  // ev is for main socket, events for client sockets
+  struct epoll_event ev, events[MAX_CLIENT];
+  ev.events = EPOLLIN;
+  // listen to socket that will have new client sockets
+  ev.data.fd = listen_sock;
+  int epollfd = epoll_create1(0);
+
+  if(epollfd == -1)
+    {
+      perror("Error creating epoll fd");
+      return EXIT_FAILURE;
+    }
+
+  if(epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1)
+    {
+      perror("Error adding socket listen_sock for epoll");
+      return EXIT_FAILURE;
+    }
+  // number of fds that are ready
+  ssize_t n_fds = 0;
 
   // set up SSL context
   SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
@@ -677,70 +732,156 @@ main(void)
 
   while(!shutdown_flag)
     {
-      struct sockaddr_in6 client_addr;
 
-      int caddr_len = sizeof(client_addr);
-
-      int client = accept(sock_fd, 
-          (struct sockaddr*)&client_addr,
-          (socklen_t*)&caddr_len);
-
-      puts("Attempting to connect");
-      if(client == -1 && shutdown_flag)
+      // add any new connections to events
+      n_fds = epoll_wait(epollfd, events, MAX_CLIENT, -1);
+      if(n_fds == -1)
         {
-          continue;
+          perror("Error polling for events on epollfd");
+          return EXIT_FAILURE;
         }
-      else if (client == - 1 && !shutdown_flag)
+      // for each new connection
+      for(ssize_t n = 0; n < n_fds; ++n)
         {
+          if(events[n].data.fd == listen_sock)
+            {
+              struct sockaddr_in6 client_addr;
 
-          perror("Error connecting to client: ");
-          continue;
-        }
+              int caddr_len = sizeof(client_addr);
 
-      SSL* ssl = SSL_new(ctx);
-      if (!ssl)
-        {
-          perror("Error establishing TLS connection: ");
-          goto error;
-        }
+              puts("TCP Handshake");
+              int client = accept(listen_sock, 
+                  (struct sockaddr*)&client_addr,
+                  (socklen_t*)&caddr_len);
 
-      SSL_set_fd(ssl, client);
-    
-      if(SSL_use_certificate_file(ssl, SSL_CERT_FILE, SSL_FILETYPE_PEM) != 1)
-        {
-          perror("Error loading certificate: ");
-          goto error;
-        }
+              if(client == -1 && shutdown_flag)
+                {
+                  continue;
+                }
+              else if (client == - 1 && !shutdown_flag)
+                {
+                  perror("Error connecting to client");
+                  continue;
+                }
 
-      if(SSL_use_PrivateKey_file(ssl, SSL_KEY_FILE, SSL_FILETYPE_PEM) != 1)
-        {
-          perror("Error loading private key: ");
-          goto error;
-        }
+              setnonblocking(client);
 
-      int ret;
-      if((ret = SSL_accept(ssl)) != 1)
-        {
-          fprintf(stderr,"%d Error during TLS handshake with code %d\n",ret, SSL_get_error(ssl, ret));
-          goto error;
-        }
+              SSL* ssl = SSL_new(ctx);
+              if (!ssl)
+                {
+                  perror("Error establishing TLS connection");
+                  goto error;
+                }
 
-      connect_args_t args = {
-        client,     
-        (void*)&client_addr,
-        (socklen_t)caddr_len
-      };
+              SSL_set_fd(ssl, client);
 
-      client_connect(ssl,(void*)&args);
+              if(SSL_use_certificate_file(ssl, SSL_CERT_FILE, SSL_FILETYPE_PEM) != 1)
+                {
+                  perror("Error loading certificate");
+                  goto error;
+                }
+
+              if(SSL_use_PrivateKey_file(ssl, SSL_KEY_FILE, SSL_FILETYPE_PEM) != 1)
+                {
+                  perror("Error loading private key");
+                  goto error;
+                }
+
+
+              ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
+
+              connect_args_t* args = malloc(sizeof(connect_args_t));
+
+              puts("1!");
+
+              *args = (connect_args_t){
+                ssl,
+                (void*)&client_addr,
+                NULL,
+                NULL,
+                (socklen_t)caddr_len,
+                client,
+                TLS_HANDSHAKE,
+              };
+
+              ev.data.ptr = args;
+
+              if (epoll_ctl(epollfd, EPOLL_CTL_ADD, client, &ev) == -1)
+                {
+                  perror("Error adding client socket to interest list");
+                  return EXIT_FAILURE;
+                }
+              continue;
+              //client_connect(ssl,(void*)&args);
 error:
-      if(client != -1)
-        {
-          close(client);
+              if(client != -1)
+              {
+                close(client);
+                continue;
+              }
+              SSL_free(ssl);
+
+            }
+          else
+            {
+              if(events[n].data.ptr == NULL)
+                {
+                  perror("Massive");
+                  exit(EXIT_FAILURE);
+                }
+              connect_args_t* args = (connect_args_t*)events[n].data.ptr;
+              connect_state_t ns = args->state;
+              SSL* ssl = args->ssl;
+              switch(args->state)
+              {
+                case(TLS_HANDSHAKE):
+                  {
+                    puts("TLS Handshake");
+                    int ret = SSL_accept(ssl);
+                    int err = SSL_get_error(ssl,ret);
+                    if(err != SSL_ERROR_NONE)
+                      {
+                        switch(err)
+                          {
+                            case(SSL_ERROR_WANT_READ):
+                            case(SSL_ERROR_WANT_ACCEPT):
+                            case(SSL_ERROR_WANT_CONNECT):
+                            case(SSL_ERROR_WANT_WRITE):
+                              {
+                                puts("4!");
+                                ns = TLS_HANDSHAKE;
+                                break;
+                              }
+                            default:
+                              fprintf(stderr,"%d Error during TLS handshake with code %d\n",ret, err);
+                              break;
+                          }
+                      }       
+                    else
+                      {
+                        puts("all good?");
+                        ns = READ_REQUEST;
+                      }
+                    args->state = ns;
+                    break;
+                  }
+                case(READ_REQUEST):
+                  {
+
+                  }
+                default:
+                  puts("stall");
+                  while(1)
+                  {
+
+                  }
+                  break;
+              }
+            }
         }
-      SSL_free(ssl);
     }
 
-  close(sock_fd);
+  close(listen_sock);
   SSL_CTX_free(ctx);
 
   return 0;
