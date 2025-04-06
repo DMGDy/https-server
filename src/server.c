@@ -16,9 +16,11 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -37,7 +39,7 @@
 // count of files that can be sent
 #define FILE_BUFF_LEN 8192
 // max wait time before server disconnects from client
-#define TIMEOUT_DURATION 500000
+#define TIMEOUT_DURATION 100000
 
 typedef enum req_line_fsm
 {
@@ -100,13 +102,19 @@ typedef struct header_info
 // for each connection
 typedef struct connect_args
 {
+  header_info_t* header_info;
   SSL* ssl;
   void* client_addr;
-  char* rbuff;
-  char* wbuff;
+  char* rbuffer;
+  char* wbuffer;
+  size_t read_size;
+  size_t write_size;
   socklen_t caddr_len;
   int client_fd;
   connect_state_t state;
+  bool done_reading;
+  bool done_writing;
+  bool read_and_write;
 } connect_args_t;
 
 static const char* header_fields[] = {"Accept", "Connection"};
@@ -122,8 +130,8 @@ volatile sig_atomic_t shutdown_flag = 0;
 
 void send_response(SSL* ssl, header_info_t* header_info);
 char* strdup(const char* s);
-void client_connect(SSL* ssl, void* args);
-int read_header(SSL* ssl, char* buff);
+int client_connect(void* args);
+int read_request(SSL* ssl, char* buff, size_t* offset, bool* complete);
 int is_complete_header(char* buff, int n);
 header_info_t* parse_header(char* buff);
 int is_header_field(char* field);
@@ -154,7 +162,7 @@ void setnonblocking(int sock) {
 void
 sig_handler(int sig)
 {
-  if(sig == SIGINT || SIGKILL)
+  if (sig == SIGINT || SIGKILL)
     {
       shutdown_flag = 1;
     }
@@ -174,29 +182,37 @@ send_response(SSL* ssl, header_info_t* header_info)
   strcpy(path+strlen(hostname),allowed_files[file_index]);
   path[path_len] = 0;
 
+  // file size for response
+  long sz = 0;
+
   // open requested file
-  if(!(file = fopen(path, "rb"))) 
+  if (!(file = fopen(path, "rb"))) 
     {
       perror("Error opening");
       free(path);
       return;
     }
   free(path);
-  // get file size
+  // get file size by seeking to end
+  fseek(file, 0L, SEEK_END);
+  sz = ftell(file);
 
+  rewind(file);
   // construct response header
   char response[HEADER_LEN] = {0};
 
-  if(file_index != 0)
+  if (file_index != 0)
     {
       sprintf(response,
           "HTTP/1.1 200 OK\n"
           "Server: epic-server v420.69(Linux)\n"
           "Accept-Ranges: bytes\n"
           "Connection: keep-alive\n"
-          "Content-Type: %s"
+          "Content-Type: %s\n"
+          "Content-Length: %ld"
           "\r\n\r\n",
-          header_info->accept_mime
+          header_info->accept_mime,
+          sz
           );
     }
   else 
@@ -221,7 +237,7 @@ send_response(SSL* ssl, header_info_t* header_info)
   while((n = fread(file_buff, 1, sizeof(file_buff),file)) > 0)
     {
       size_t bytes = 0;
-      if((bytes = SSL_write(ssl, file_buff, n)) != n)
+      if ((bytes = SSL_write(ssl, file_buff, n)) != n)
         {
           perror("Error error sending file");
         }
@@ -247,7 +263,7 @@ strdup(const char* src)
 
   char* dest = malloc(n);
 
-  if(dest == NULL)
+  if (dest == NULL)
     {
       return NULL;
     }
@@ -260,14 +276,13 @@ strdup(const char* src)
 int
 get_req_file(char* requested)
 {
-  if(requested == NULL)
+  if (requested == NULL)
     {
       return 0;
     }
   for(int i = 1; i < ALLOWED_FILES; ++i)
     {
       // discard first '/'
-      printf("%s ?= %s\n",requested,allowed_files[i]);
       if (strcmp(requested+1, allowed_files[i]) == 0)
         {
           return i;
@@ -303,7 +318,7 @@ parse_req_line(char* line)
             {
               request_t req = is_allowed_req(tok);
               req_line.request = req;        
-              if(!(req < 0))
+              if (!(req < 0))
                 {
                   nstate = PATH;
                 }
@@ -350,7 +365,7 @@ is_image(int pos)
 
   //"assets/buttons/agplv3.png",
   //                       ^  
-  if(strcmp(allowed_files[pos]+(len-3),"gif") == 0||
+  if (strcmp(allowed_files[pos]+(len-3),"gif") == 0||
       strcmp(allowed_files[pos]+(len-3),"ico") == 0||
       strcmp(allowed_files[pos]+(len-3),"png") == 0)
     {
@@ -366,7 +381,7 @@ is_allowed_req(char* req)
   int pos = -1;
   for(size_t i = 0; i < allowed_reqs_len; ++i)
     {
-      if(strcmp(req,allowed_rqs[i]) == 0)
+      if (strcmp(req,allowed_rqs[i]) == 0)
         {
           pos = i;
           break;
@@ -381,13 +396,13 @@ int
 is_header_field(char* field)
 {
   int pos = -1;
-  if(!field)
+  if (!field)
     {
       return pos;
     }
   for(size_t i = 0; i < header_fields_len; ++i)
     {
-      if(strcmp(field,header_fields[i]) == 0)
+      if (strcmp(field,header_fields[i]) == 0)
         {
           pos = i;
           break;
@@ -441,7 +456,7 @@ parse_header(char* buff)
               save = (line)? line + strlen(line) + 1: NULL;
               field = (line)? strtok(line,": "): NULL;
 
-              if(is_header_field(line) >= 0)
+              if (is_header_field(line) >= 0)
                 {
                   nstate = VAL;
                 }
@@ -453,11 +468,11 @@ parse_header(char* buff)
               val = strtok(NULL,": ");
               nstate = ATTR;
 
-              if(strcmp("Accept",field) == 0)
+              if (strcmp("Accept",field) == 0)
                 {
                   nstate = VALS;
                 }
-              else if(strcmp("Connection",field) == 0)
+              else if (strcmp("Connection",field) == 0)
                 {
                   header_info->connection = strdup(val);
                 }
@@ -479,7 +494,7 @@ parse_header(char* buff)
                   char actual_type[16] = "image/";   
                   size_t len = strlen(allowed_files[af_pos]);
 
-                  if(strcmp(allowed_files[af_pos]+(len-3), "ico") == 0)
+                  if (strcmp(allowed_files[af_pos]+(len-3), "ico") == 0)
                     {
 
                       strcpy(actual_type+6,"x-icon");
@@ -527,7 +542,7 @@ is_complete_header(char* buff, int n)
       switch(state)
         {
           case(SCANNING):
-            if(c == '\r')   
+            if (c == '\r')   
               {
                 nstate = CR;
                 cr_ctr++;
@@ -538,7 +553,7 @@ is_complete_header(char* buff, int n)
               }
             break;
           case(CR):
-            if(c == '\n' && (cr_ctr == 2 && lf_ctr == 1)) 
+            if (c == '\n' && (cr_ctr == 2 && lf_ctr == 1)) 
               {
                 // \r\n\r\n
                 // *     ^  3 positions away from current index 
@@ -582,70 +597,165 @@ is_complete_header(char* buff, int n)
 
 // fill buff* with header information
 int 
-read_header(SSL* ssl, char* buff) 
+read_request(SSL* ssl, char* buff, size_t* offset, bool* complete) 
 {
-  int complete = 0;
-  size_t offset = 0;
   size_t timeout = 0;
   do 
     {
-      size_t n = SSL_read(ssl, buff+offset, HEADER_LEN-offset);
+      int n = SSL_read(ssl, buff+*offset, HEADER_LEN-*offset);
+      int err = SSL_get_error(ssl, n);
       // if receiving nothing for a while, return -1 to end connection
-      if(n == 0)
+      switch(err)
         {
-          timeout++;
+          // probably done reading
+          case SSL_ERROR_NONE:
+            {
+              *complete = true;
+              *offset += n;
+              break;
+            }
+          // not done reading yet
+          case SSL_ERROR_WANT_READ:
+            {
+              *offset += n;
+              break;
+            }
+          //something bad, timeout if it keeps happening
+          default:
+            timeout++;
         }
-      if(timeout >= TIMEOUT_DURATION)
+      if (timeout >= TIMEOUT_DURATION)
         {
           return -1;
         }
       // pos is the bytes up to CRLF
-      int pos = is_complete_header(buff,(int)n);
-      if (pos > 0) 
-        {
-          buff[pos] = '\0';
-          complete = 1;
-        } 
-      else 
-        {
-          offset += n;
-        }
     } 
-  while(!complete);
+  while(!*complete);
 
   return 0;
 }
 
-void
-client_connect(SSL* ssl, void* args) 
+int
+client_connect(void* vargs) 
 {
-  connect_args_t* connect_args = (connect_args_t*)args;
-  struct sockaddr_in6* client = connect_args->client_addr;
-
-  // get client ip
-  char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
-
-  inet_ntop(AF_INET6,
-      &client->sin6_addr,
-      ip_inet6_str,
-      INET6_ADDRSTRLEN);
-
-  printf("\nNew connection to \n\tIPv6: %s\n",
-      ip_inet6_str);
-
+  connect_args_t* args = (connect_args_t*)vargs;
   int keep_alive = 0;
+
+  connect_state_t* state = &args->state;
+  connect_state_t next_state = *state;
+  SSL* ssl = args->ssl;
+
+  switch(*state)
+    {
+      case TLS_HANDSHAKE:
+        {
+          puts("TLS Handshake in progress...");
+          int ret = SSL_accept(ssl);
+          int err = SSL_get_error(ssl,ret);
+          if (err != SSL_ERROR_NONE)
+            {
+              switch(err)
+                {
+                  case SSL_ERROR_WANT_READ:
+                  case SSL_ERROR_WANT_ACCEPT:
+                  case SSL_ERROR_WANT_CONNECT:
+                  case SSL_ERROR_WANT_WRITE:
+                    {
+                      next_state = TLS_HANDSHAKE;
+                      break;
+                    }
+                  default:
+                    fprintf(stderr,"%d Error during TLS handshake with code %d\n",ret, err);
+                    break;
+                }
+            }
+          else
+            {
+              puts("TLS handshake accepted");
+              next_state = READ_REQUEST;
+            }
+          break;
+        }
+      case READ_REQUEST:
+        {
+          puts("now reading");
+          char* rbuffer = args->rbuffer;
+          rbuffer = NULL;
+          rbuffer = malloc(HEADER_LEN);
+          // cheeky way to exit in one line
+          (!rbuffer)? (exit(EXIT_FAILURE),1): 0;
+          // continue reading
+          if (!args->done_reading)
+            {
+              int ret = read_request(ssl, rbuffer, &args->read_size, &args->done_reading);
+              if (ret > 0)
+                {
+                  return 1;
+                }
+              int pos = is_complete_header(rbuffer,args->read_size);
+              if (pos <= 0)
+                {
+                  printf("%s\n",rbuffer);
+                  fprintf(stderr,"Error parsing header file\n");
+                  return 1;
+                }
+              rbuffer[pos] = '\0';
+            }
+          // parse through (cant have else otherwise it will skip if 
+          // read call finishes)
+          if (args->done_reading)
+            {
+              printf("%s",rbuffer);
+              args->header_info = parse_header(rbuffer);
+              puts("");
+              next_state = WRITE_RESPONSE;
+            }
+          if(args->read_and_write)
+            {
+              goto write;
+            }
+          break;
+        }
+      case WRITE_RESPONSE:
+        {
+write:
+          send_response(args->ssl, args->header_info);
+//          SSL_free(args->ssl);
+//
+          args->rbuffer = 0;
+          args->done_reading = 0;
+          args->read_size = 0;
+          free(args->header_info->connection);
+          free(args->header_info->accept_mime);
+          free(args->header_info->request_line.version);
+          free(args->header_info);
+//          free(args->rbuffer);
+          next_state = READ_REQUEST;
+          break;
+        }
+      case CLOSE_CONNECTION:
+        {
+          return 0;         
+          break;
+        }
+    }
+
+
+  printf("%d - > %d\n",(int)(*state), (int)next_state);
+  *state = next_state;
+  /*
   // read header
   char* header_buff = malloc(HEADER_LEN);
   // header_buff to contain header string, terminated with \0
-  keep_alive = read_header(ssl, header_buff);
+  keep_alive = read_header(connect_args->ssl, header_buff);
   printf("%s\n",header_buff);
-  if(keep_alive == 0)
+  if (keep_alive == 0)
   {
 
     // parse information we care about in the header
     header_info_t* header_info = parse_header(header_buff);
 
-    send_response(ssl, header_info);
+    send_response(connect_args->ssl, header_info);
 
     free(header_buff);
 
@@ -654,9 +764,10 @@ client_connect(SSL* ssl, void* args)
     free(header_info->request_line.version);
     free(header_info);
   }
+    */
 
 
-  puts("Disconnected");
+  return 0;
 }
 
 int
@@ -675,27 +786,27 @@ main(void)
   int listen_sock = socket(AF_INET6,SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 
   int set = 1;
-  if(setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) == -1)
+  if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) == -1)
     {
       perror("Error assigning socket options");
       return EXIT_FAILURE;
     }
 
   int unset = 0;
-  if(setsockopt(listen_sock, IPPROTO_IPV6, IPV6_V6ONLY, &unset, sizeof(unset)) == -1)
+  if (setsockopt(listen_sock, IPPROTO_IPV6, IPV6_V6ONLY, &unset, sizeof(unset)) == -1)
     {
       perror("Error assigning socket options");
       return EXIT_FAILURE;
     }
 
-  if(bind(listen_sock,(struct sockaddr*)&addr, (socklen_t)sizeof(addr)) == -1)
+  if (bind(listen_sock,(struct sockaddr*)&addr, (socklen_t)sizeof(addr)) == -1)
     {
       perror("Error connecting to socket");
       close(listen_sock);
       return EXIT_FAILURE;
     }
 
-  if(listen(listen_sock, MAX_CLIENT) == -1)
+  if (listen(listen_sock, MAX_CLIENT) == -1)
     {
       perror("Error listening");
       close(listen_sock);
@@ -709,13 +820,13 @@ main(void)
   ev.data.fd = listen_sock;
   int epollfd = epoll_create1(0);
 
-  if(epollfd == -1)
+  if (epollfd == -1)
     {
       perror("Error creating epoll fd");
       return EXIT_FAILURE;
     }
 
-  if(epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1)
+  if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen_sock, &ev) == -1)
     {
       perror("Error adding socket listen_sock for epoll");
       return EXIT_FAILURE;
@@ -735,7 +846,7 @@ main(void)
 
       // add any new connections to events
       n_fds = epoll_wait(epollfd, events, MAX_CLIENT, -1);
-      if(n_fds == -1)
+      if (n_fds == -1)
         {
           perror("Error polling for events on epollfd");
           return EXIT_FAILURE;
@@ -743,7 +854,7 @@ main(void)
       // for each new connection
       for(ssize_t n = 0; n < n_fds; ++n)
         {
-          if(events[n].data.fd == listen_sock)
+          if (events[n].data.fd == listen_sock)
             {
               struct sockaddr_in6 client_addr;
 
@@ -754,7 +865,7 @@ main(void)
                   (struct sockaddr*)&client_addr,
                   (socklen_t*)&caddr_len);
 
-              if(client == -1 && shutdown_flag)
+              if (client == -1 && shutdown_flag)
                 {
                   continue;
                 }
@@ -763,6 +874,17 @@ main(void)
                   perror("Error connecting to client");
                   continue;
                 }
+
+              // get client ip
+              char ip_inet6_str[INET6_ADDRSTRLEN] = {0};
+
+              inet_ntop(AF_INET6,
+                  &client_addr.sin6_addr,
+                  ip_inet6_str,
+                  INET6_ADDRSTRLEN);
+
+              printf("\nNew connection to \n\tIPv6: %s\n",
+                  ip_inet6_str);
 
               setnonblocking(client);
 
@@ -775,13 +897,13 @@ main(void)
 
               SSL_set_fd(ssl, client);
 
-              if(SSL_use_certificate_file(ssl, SSL_CERT_FILE, SSL_FILETYPE_PEM) != 1)
+              if (SSL_use_certificate_file(ssl, SSL_CERT_FILE, SSL_FILETYPE_PEM) != 1)
                 {
                   perror("Error loading certificate");
                   goto error;
                 }
 
-              if(SSL_use_PrivateKey_file(ssl, SSL_KEY_FILE, SSL_FILETYPE_PEM) != 1)
+              if (SSL_use_PrivateKey_file(ssl, SSL_KEY_FILE, SSL_FILETYPE_PEM) != 1)
                 {
                   perror("Error loading private key");
                   goto error;
@@ -792,16 +914,21 @@ main(void)
 
               connect_args_t* args = malloc(sizeof(connect_args_t));
 
-              puts("1!");
-
-              *args = (connect_args_t){
+              // looks awful but you can always scroll to the top
+              *args = (connect_args_t) {
+                NULL,
                 ssl,
                 (void*)&client_addr,
                 NULL,
                 NULL,
+                0,
+                0,
                 (socklen_t)caddr_len,
                 client,
                 TLS_HANDSHAKE,
+                false,
+                false,
+                false
               };
 
               ev.data.ptr = args;
@@ -814,69 +941,29 @@ main(void)
               continue;
               //client_connect(ssl,(void*)&args);
 error:
-              if(client != -1)
-              {
-                close(client);
-                continue;
-              }
+              if (client != -1)
+                {
+                  close(client);
+                  continue;
+                }
               SSL_free(ssl);
 
             }
           else
             {
-              if(events[n].data.ptr == NULL)
+              void* args = events[n].data.ptr;
+              if (args == NULL)
                 {
                   perror("Massive");
                   exit(EXIT_FAILURE);
                 }
-              connect_args_t* args = (connect_args_t*)events[n].data.ptr;
-              connect_state_t ns = args->state;
-              SSL* ssl = args->ssl;
-              switch(args->state)
-              {
-                case(TLS_HANDSHAKE):
-                  {
-                    puts("TLS Handshake");
-                    int ret = SSL_accept(ssl);
-                    int err = SSL_get_error(ssl,ret);
-                    if(err != SSL_ERROR_NONE)
-                      {
-                        switch(err)
-                          {
-                            case(SSL_ERROR_WANT_READ):
-                            case(SSL_ERROR_WANT_ACCEPT):
-                            case(SSL_ERROR_WANT_CONNECT):
-                            case(SSL_ERROR_WANT_WRITE):
-                              {
-                                puts("4!");
-                                ns = TLS_HANDSHAKE;
-                                break;
-                              }
-                            default:
-                              fprintf(stderr,"%d Error during TLS handshake with code %d\n",ret, err);
-                              break;
-                          }
-                      }       
-                    else
-                      {
-                        puts("all good?");
-                        ns = READ_REQUEST;
-                      }
-                    args->state = ns;
-                    break;
-                  }
-                case(READ_REQUEST):
-                  {
-
-                  }
-                default:
-                  puts("stall");
-                  while(1)
-                  {
-
-                  }
-                  break;
-              }
+              if(events[n].events == 5)
+                {
+                  puts("both");
+                  ((connect_args_t*)args)->read_and_write = true;
+                }
+              puts("going in");
+              client_connect(args);
             }
         }
     }
