@@ -1,5 +1,8 @@
 # Dual-stack HTTPS server 
 
+> [!IMPORTANT ]
+> I'm currently moving to Go for such a project as it makes a lot more sense for what I want out of it. It can be looked at [here](https://github.com/DMGDy/go-https)
+
 An HTTP server. I will see how far I can go with its use case. 
 Potentially can replace [apache](https://httpd.apache.org/) on my personal website.
 Would need to do many things for that to work.
